@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Rob the Nest</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- ── LOBBY ─────────────────────────────────────────────────────────── -->
+  <div id="lobby" class="screen">
+    <h1>Rob the Nest</h1>
+    <p class="subtitle">Steal items from other bases. Most items when time runs out wins.</p>
+
+    <div id="emoji-picker">
+      <button class="emoji-opt selected" data-emoji="🦊">🦊</button>
+      <button class="emoji-opt" data-emoji="🐻">🐻</button>
+      <button class="emoji-opt" data-emoji="🐸">🐸</button>
+      <button class="emoji-opt" data-emoji="🦄">🦄</button>
+      <button class="emoji-opt" data-emoji="🐙">🐙</button>
+      <button class="emoji-opt" data-emoji="🤖">🤖</button>
+      <button class="emoji-opt" data-emoji="👻">👻</button>
+      <button class="emoji-opt" data-emoji="🐵">🐵</button>
+      <button class="emoji-opt" data-emoji="🐯">🐯</button>
+      <button class="emoji-opt" data-emoji="🦁">🦁</button>
+      <button class="emoji-opt" data-emoji="🐺">🐺</button>
+      <button class="emoji-opt" data-emoji="🦅">🦅</button>
+      <button class="emoji-opt" data-emoji="🐢">🐢</button>
+      <button class="emoji-opt" data-emoji="🦈">🦈</button>
+      <button class="emoji-opt" data-emoji="🦋">🦋</button>
+      <button class="emoji-opt" data-emoji="🎭">🎭</button>
+    </div>
+
+    <div id="join-form">
+      <input id="name-input" type="text" placeholder="Your name" maxlength="16" autocomplete="off" />
+      <button id="join-btn">Join</button>
+    </div>
+    <div id="err-msg"></div>
+
+    <div id="player-list-wrap">
+      <h3>Players <span id="player-count"></span></h3>
+      <ul id="player-list"></ul>
+    </div>
+
+    <!-- Host-only settings, shown after joining as host -->
+    <div id="settings-panel" style="display:none">
+      <h3 class="settings-title">Game Settings</h3>
+      <div class="settings-row">
+        <label>
+          Duration
+          <select id="setting-timer">
+            <option value="60">1 min</option>
+            <option value="120">2 min</option>
+            <option value="180">3 min</option>
+            <option value="300" selected>5 min</option>
+            <option value="600">10 min</option>
+          </select>
+        </label>
+        <label>
+          Items per player
+          <input type="number" id="setting-items" min="1" max="30" value="10" />
+        </label>
+      </div>
+    </div>
+
+    <div id="lobby-controls">
+      <button id="start-btn" style="display:none">Start Game</button>
+      <p id="wait-msg" style="display:none">Waiting for host to start…</p>
+    </div>
+
+    <div class="instructions">
+      <strong>Move:</strong> Arrow keys or WASD &nbsp;·&nbsp;
+      Walk onto an enemy base to steal one item &nbsp;·&nbsp;
+      Return to your base to deposit &nbsp;·&nbsp;
+      ⚡ Speed boost spawns on the map
+    </div>
+  </div>
+
+  <!-- ── GAME ──────────────────────────────────────────────────────────── -->
+  <div id="game" class="screen" style="display:none">
+    <div id="hud">
+      <div id="timer">5:00</div>
+      <div id="scores"></div>
+    </div>
+    <canvas id="canvas"></canvas>
+  </div>
+
+  <!-- ── END ───────────────────────────────────────────────────────────── -->
+  <div id="end" class="screen" style="display:none">
+    <h1>Time's Up!</h1>
+    <div id="final"></div>
+    <button id="restart-btn" style="display:none">Play Again</button>
+    <p id="end-wait" style="display:none">Waiting for host to restart…</p>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>

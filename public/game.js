@@ -49,12 +49,29 @@ for (const name of ['pete', 'francis', 'alicia', 'nigel', 'scotland', 'chardi'])
   characterImgs[name] = img;
 }
 
-document.querySelectorAll('.char-opt').forEach(btn => {
+const charButtons = [...document.querySelectorAll('.char-opt')];
+
+charButtons.forEach(btn => {
   btn.addEventListener('click', () => {
-    document.querySelectorAll('.char-opt').forEach(b => b.classList.remove('selected'));
+    charButtons.forEach(b => b.classList.remove('selected'));
     btn.classList.add('selected');
     selectedCharacter = btn.dataset.character;
   });
+});
+
+// Arrow key navigation in lobby character picker
+document.addEventListener('keydown', e => {
+  if (state?.phase && state.phase !== 'lobby') return;
+  if (document.activeElement === nameInput) return; // don't hijack typing
+  const idx = charButtons.findIndex(b => b.classList.contains('selected'));
+  let next = -1;
+  if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') next = (idx + 1) % charButtons.length;
+  else if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') next = (idx - 1 + charButtons.length) % charButtons.length;
+  if (next === -1) return;
+  e.preventDefault();
+  charButtons.forEach(b => b.classList.remove('selected'));
+  charButtons[next].classList.add('selected');
+  selectedCharacter = charButtons[next].dataset.character;
 });
 
 // ── Screen helper ─────────────────────────────────────────────────────────────

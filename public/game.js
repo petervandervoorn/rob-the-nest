@@ -27,6 +27,8 @@ const scoresEl     = $('scores');
 const finalEl      = $('final');
 const restartBtn   = $('restart-btn');
 const endWaitEl    = $('end-wait');
+const feedList     = $('feed-list');
+const lbList       = $('lb-list');
 
 const canvas = $('canvas');
 const ctx    = canvas.getContext('2d');
@@ -109,8 +111,8 @@ socket.on('state_update', s => {
     stopMusic();
     show('lobby'); renderLobby();
   }
-  else if (s.phase === 'countdown') { playMusic(); show('game');  renderHUD(); $('hud').style.maxWidth = SIZE + 'px'; }
-  else if (s.phase === 'playing')   { playMusic(); show('game');  renderHUD(); $('hud').style.maxWidth = SIZE + 'px'; }
+  else if (s.phase === 'countdown') { playMusic(); show('game');  renderHUD(); renderLeaderboard(); $('hud').style.maxWidth = (SIZE + 420) + 'px'; $('feed').style.height = SIZE + 'px'; $('leaderboard').style.height = SIZE + 'px'; }
+  else if (s.phase === 'playing')   { playMusic(); show('game');  renderHUD(); renderLeaderboard(); $('hud').style.maxWidth = (SIZE + 420) + 'px'; $('feed').style.height = SIZE + 'px'; $('leaderboard').style.height = SIZE + 'px'; }
   else if (s.phase === 'ended')     { stopMusic(); show('end');   renderEnd(); }
 });
 
@@ -171,6 +173,22 @@ function renderLobby() {
     waitMsg.style.display       = 'none';
     settingsPanel.style.display = 'none';
   }
+}
+
+// ── Leaderboard render ───────────────────────────────────────────────────────
+function renderLeaderboard() {
+  if (!state) return;
+  const sorted = Object.values(state.players).sort((a, b) => b.baseItems - a.baseItems);
+
+  lbList.innerHTML = sorted.map((p, i) =>
+    `<li${p.id === myId ? ' class="lb-me"' : ''} style="color:${p.color}">
+       <span class="lb-rank">${i + 1}</span>
+       <img class="lb-avatar" src="/characters/${p.character}.png" alt="${p.character}" />
+       <span class="lb-name">${escHtml(p.name)}</span>
+       <span class="lb-score">${p.baseItems}</span>
+       ${p.carrying ? '<span class="lb-carry">📦</span>' : ''}
+     </li>`
+  ).join('');
 }
 
 // ── HUD render ────────────────────────────────────────────────────────────────
@@ -444,9 +462,6 @@ function renderGame() {
   // ── Particles ──
   updateAndRenderParticles();
 
-  // ── Kill feed ──
-  renderEventLog();
-
   // ── Countdown overlay ──
   if (state.phase === 'countdown' && state.countdownTimer > 0) {
     ctx.fillStyle = 'rgba(0,0,0,0.55)';
@@ -601,26 +616,151 @@ let musicMuted    = false;
 let musicGain     = null;
 let musicTimeout  = null;
 
-// Pentatonic melody in A minor — loopable, catchy, 8-bit feel
-const BPM       = 140;
+// Fast aggressive 8-bit battle theme
+const BPM       = 175;
 const BEAT      = 60 / BPM;
 const NOTE_FREQS = {
-  C4:261.63, D4:293.66, E4:329.63, G4:392.00, A4:440.00,
-  C5:523.25, D5:587.33, E5:659.25, G5:783.99, A5:880.00,
-  A3:220.00, C4b:261.63, E3:164.81, G3:196.00, C3:130.81,
+  // Octave 3
+  A3:220.00, Bb3:233.08, B3:246.94, C3:130.81, D3:146.83, E3:164.81, F3:174.61, G3:196.00,
+  // Octave 4
+  A4:440.00, Bb4:466.16, B4:493.88, C4:261.63, D4:293.66, E4:329.63, F4:349.23, G4:392.00,
+  // Octave 5
+  A5:880.00, Bb5:932.33, B5:987.77, C5:523.25, D5:587.33, E5:659.25, F5:698.46, G5:783.99,
 };
 
+// Driving staccato melody — minor key, rapid runs, dramatic jumps
+// 16 bars — A section (intense), B section (variation), C section (build), A' section (resolve)
 const MELODY = [
-  ['A4',1],['C5',0.5],['D5',0.5],['E5',1],['D5',0.5],['C5',0.5],
-  ['A4',1],['G4',1],['E4',1],['G4',0.5],['A4',0.5],
-  ['C5',1],['A4',0.5],['G4',0.5],['E4',1],['D4',1],
-  ['E4',1],['G4',0.5],['A4',0.5],['C5',1],['A4',1],
+  // A: bars 1-4 — aggressive opening riff
+  ['E5',0.5],['E5',0.25],['E5',0.25],['D5',0.5],['C5',0.5],['D5',0.5],['E5',0.5],['G5',0.5],['E5',0.5],
+  ['A5',0.5],['G5',0.25],['E5',0.25],['D5',0.5],['C5',0.5],['D5',0.75],['E5',0.25],['D5',0.5],['C5',0.5],
+  // B: bars 5-8 — higher register, new rhythm pattern
+  ['G5',0.25],['A5',0.25],['G5',0.5],['E5',0.5],['D5',0.25],['E5',0.25],['G5',0.5],['A5',0.5],['G5',0.5],
+  ['E5',0.5],['D5',0.25],['C5',0.25],['D5',0.5],['E5',0.25],['E5',0.25],['G5',0.5],['E5',0.5],['D5',0.5],
+  // C: bars 9-12 — building tension, descending runs
+  ['A5',0.5],['A5',0.25],['G5',0.25],['E5',0.5],['D5',0.5],['C5',0.5],['D5',0.5],['E5',0.5],['G5',0.5],
+  ['A5',0.75],['G5',0.25],['E5',0.25],['D5',0.25],['C5',0.5],['A4',0.5],['C5',0.5],['D5',0.25],['E5',0.25],['D5',0.5],
+  // A': bars 13-16 — return with variation, dramatic ending
+  ['E5',0.5],['E5',0.25],['E5',0.25],['G5',0.5],['A5',0.5],['G5',0.25],['E5',0.25],['D5',0.5],['C5',0.5],
+  ['D5',0.5],['E5',0.25],['G5',0.25],['A5',0.5],['G5',0.5],['E5',0.25],['D5',0.25],['E5',0.25],['C5',0.25],['D5',0.5],['E5',0.5],
 ];
 
+// Pumping bass — octave jumps and driving rhythm
 const BASS = [
-  ['A3',2],['C4b',2],['G3',2],['E3',2],
-  ['A3',2],['C4b',2],['G3',2],['E3',1],['A3',1],
+  // A: bars 1-4
+  ['A3',0.5],['A3',0.5],['E3',0.5],['A3',0.5],['C4',0.5],['C4',0.5],['G3',0.5],['C4',0.5],
+  ['F3',0.5],['F3',0.5],['C3',0.5],['F3',0.5],['G3',0.5],['G3',0.5],['D3',0.5],['G3',0.5],
+  // B: bars 5-8 — syncopated variation
+  ['A3',0.5],['E3',0.25],['A3',0.25],['A3',0.5],['E3',0.5],['C4',0.5],['G3',0.25],['C4',0.25],['C4',0.5],['G3',0.5],
+  ['F3',0.5],['C3',0.25],['F3',0.25],['F3',0.5],['C3',0.5],['G3',0.5],['G3',0.25],['D3',0.25],['G3',0.25],['G3',0.25],['A3',0.5],
+  // C: bars 9-12 — double-time pumping
+  ['A3',0.25],['A3',0.25],['E3',0.25],['A3',0.25],['A3',0.25],['E3',0.25],['A3',0.25],['E3',0.25],
+  ['C4',0.25],['C4',0.25],['G3',0.25],['C4',0.25],['C4',0.25],['G3',0.25],['C4',0.25],['G3',0.25],
+  ['F3',0.25],['F3',0.25],['C3',0.25],['F3',0.25],['F3',0.25],['C3',0.25],['F3',0.25],['C3',0.25],
+  ['G3',0.25],['G3',0.25],['D3',0.25],['G3',0.25],['G3',0.25],['D3',0.25],['G3',0.25],['A3',0.25],
+  // A': bars 13-16
+  ['A3',0.5],['A3',0.5],['E3',0.5],['A3',0.5],['C4',0.5],['C4',0.5],['G3',0.5],['C4',0.5],
+  ['F3',0.5],['F3',0.5],['C3',0.5],['F3',0.5],['G3',0.5],['G3',0.25],['G3',0.25],['G3',0.25],['A3',0.25],
 ];
+
+// Rapid arpeggiated chords — follows harmony, 16 bars
+const ARP = [
+  // A: bars 1-4
+  ['A4',0.25],['C5',0.25],['E5',0.25],['A4',0.25], ['A4',0.25],['C5',0.25],['E5',0.25],['A4',0.25],
+  ['C5',0.25],['E5',0.25],['G5',0.25],['C5',0.25], ['C5',0.25],['E5',0.25],['G5',0.25],['C5',0.25],
+  ['F4',0.25],['A4',0.25],['C5',0.25],['F4',0.25], ['F4',0.25],['A4',0.25],['C5',0.25],['F4',0.25],
+  ['G4',0.25],['B4',0.25],['D5',0.25],['G4',0.25], ['G4',0.25],['B4',0.25],['D5',0.25],['G4',0.25],
+  // B: bars 5-8 — descending arp pattern
+  ['E5',0.25],['C5',0.25],['A4',0.25],['E5',0.25], ['E5',0.25],['C5',0.25],['A4',0.25],['C5',0.25],
+  ['G5',0.25],['E5',0.25],['C5',0.25],['G5',0.25], ['G5',0.25],['E5',0.25],['C5',0.25],['E5',0.25],
+  ['C5',0.25],['A4',0.25],['F4',0.25],['C5',0.25], ['C5',0.25],['A4',0.25],['F4',0.25],['A4',0.25],
+  ['D5',0.25],['B4',0.25],['G4',0.25],['D5',0.25], ['D5',0.25],['B4',0.25],['G4',0.25],['B4',0.25],
+  // C: bars 9-12 — rapid ascending
+  ['A4',0.25],['C5',0.25],['E5',0.25],['A5',0.25], ['E5',0.25],['C5',0.25],['A4',0.25],['C5',0.25],
+  ['C5',0.25],['E5',0.25],['G5',0.25],['E5',0.25], ['G5',0.25],['E5',0.25],['C5',0.25],['E5',0.25],
+  ['F4',0.25],['A4',0.25],['C5',0.25],['F5',0.25], ['C5',0.25],['A4',0.25],['F4',0.25],['A4',0.25],
+  ['G4',0.25],['B4',0.25],['D5',0.25],['G5',0.25], ['D5',0.25],['B4',0.25],['G4',0.25],['B4',0.25],
+  // A': bars 13-16 — same as A
+  ['A4',0.25],['C5',0.25],['E5',0.25],['A4',0.25], ['A4',0.25],['C5',0.25],['E5',0.25],['A4',0.25],
+  ['C5',0.25],['E5',0.25],['G5',0.25],['C5',0.25], ['C5',0.25],['E5',0.25],['G5',0.25],['C5',0.25],
+  ['F4',0.25],['A4',0.25],['C5',0.25],['F4',0.25], ['F4',0.25],['A4',0.25],['C5',0.25],['F4',0.25],
+  ['G4',0.25],['B4',0.25],['D5',0.25],['G4',0.25], ['G4',0.25],['B4',0.25],['D5',0.25],['G4',0.25],
+];
+
+// Pre-calculate loop duration in seconds
+const MELODY_DUR = MELODY.reduce((s, [, b]) => s + b * BEAT, 0);
+
+function scheduleLoop(ac, startTime) {
+  // Lead melody — punchy square wave
+  let t = startTime;
+  for (const [note, beats] of MELODY) {
+    const dur = beats * BEAT;
+    const osc = ac.createOscillator();
+    const g   = ac.createGain();
+    osc.connect(g);
+    g.connect(musicGain);
+    osc.type = 'square';
+    osc.frequency.value = NOTE_FREQS[note];
+    g.gain.setValueAtTime(0.45, t);
+    g.gain.setValueAtTime(0.45, t + dur * 0.6);
+    g.gain.exponentialRampToValueAtTime(0.01, t + dur * 0.85);
+    osc.start(t);
+    osc.stop(t + dur);
+    t += dur;
+  }
+
+  // Driving bass — layered sawtooth + triangle for heavy low-end
+  let bt = startTime;
+  for (const [note, beats] of BASS) {
+    const dur = beats * BEAT;
+    const freq = NOTE_FREQS[note];
+
+    // Main bass — sawtooth, loud
+    const osc1 = ac.createOscillator();
+    const g1   = ac.createGain();
+    osc1.connect(g1);
+    g1.connect(musicGain);
+    osc1.type = 'sawtooth';
+    osc1.frequency.value = freq;
+    g1.gain.setValueAtTime(0.5, bt);
+    g1.gain.exponentialRampToValueAtTime(0.01, bt + dur * 0.75);
+    osc1.start(bt);
+    osc1.stop(bt + dur);
+
+    // Sub bass — triangle one octave down for rumble
+    const osc2 = ac.createOscillator();
+    const g2   = ac.createGain();
+    osc2.connect(g2);
+    g2.connect(musicGain);
+    osc2.type = 'triangle';
+    osc2.frequency.value = freq * 0.5;
+    g2.gain.setValueAtTime(0.6, bt);
+    g2.gain.exponentialRampToValueAtTime(0.01, bt + dur * 0.8);
+    osc2.start(bt);
+    osc2.stop(bt + dur);
+
+    bt += dur;
+  }
+
+  // Fast arpeggio — quiet pulse wave shimmer
+  let at = startTime;
+  for (const [note, beats] of ARP) {
+    const dur = beats * BEAT;
+    const osc = ac.createOscillator();
+    const g   = ac.createGain();
+    osc.connect(g);
+    g.connect(musicGain);
+    osc.type = 'square';
+    osc.frequency.value = NOTE_FREQS[note] * 0.5; // one octave down for body
+    g.gain.setValueAtTime(0.12, at);
+    g.gain.exponentialRampToValueAtTime(0.01, at + dur * 0.6);
+    osc.start(at);
+    osc.stop(at + dur);
+    at += dur;
+  }
+}
+
+let nextLoopStart = 0;
 
 function playMusic() {
   if (musicPlaying) return;
@@ -633,56 +773,28 @@ function playMusic() {
     musicGain.gain.value = musicMuted ? 0 : 0.08;
   }
 
-  function scheduleLoop() {
-    const startTime = ac.currentTime + 0.05;
+  // Schedule first two loops immediately for gapless playback
+  nextLoopStart = ac.currentTime + 0.05;
+  scheduleLoop(ac, nextLoopStart);
+  nextLoopStart += MELODY_DUR;
+  scheduleLoop(ac, nextLoopStart);
+  nextLoopStart += MELODY_DUR;
 
-    // Melody
-    let t = startTime;
-    for (const [note, beats] of MELODY) {
-      const dur = beats * BEAT;
-      const osc = ac.createOscillator();
-      const g   = ac.createGain();
-      osc.connect(g);
-      g.connect(musicGain);
-      osc.type = 'square';
-      osc.frequency.value = NOTE_FREQS[note];
-      g.gain.setValueAtTime(0.5, t);
-      g.gain.exponentialRampToValueAtTime(0.01, t + dur * 0.9);
-      osc.start(t);
-      osc.stop(t + dur);
-      t += dur;
+  // Keep scheduling ahead — check every half-loop if we need another
+  musicTimeout = setInterval(() => {
+    if (!musicPlaying) return;
+    const ac = getAC();
+    // Always stay at least one loop ahead of current time
+    while (nextLoopStart < ac.currentTime + MELODY_DUR + 0.5) {
+      scheduleLoop(ac, nextLoopStart);
+      nextLoopStart += MELODY_DUR;
     }
-    const loopDur = t - startTime;
-
-    // Bass
-    let bt = startTime;
-    for (const [note, beats] of BASS) {
-      const dur = beats * BEAT;
-      const osc = ac.createOscillator();
-      const g   = ac.createGain();
-      osc.connect(g);
-      g.connect(musicGain);
-      osc.type = 'triangle';
-      osc.frequency.value = NOTE_FREQS[note];
-      g.gain.setValueAtTime(0.6, bt);
-      g.gain.exponentialRampToValueAtTime(0.01, bt + dur * 0.85);
-      osc.start(bt);
-      osc.stop(bt + dur);
-      bt += dur;
-    }
-
-    // Schedule next loop
-    musicTimeout = setTimeout(() => {
-      if (musicPlaying) scheduleLoop();
-    }, (loopDur - 0.1) * 1000);
-  }
-
-  scheduleLoop();
+  }, (MELODY_DUR / 2) * 1000);
 }
 
 function stopMusic() {
   musicPlaying = false;
-  if (musicTimeout) { clearTimeout(musicTimeout); musicTimeout = null; }
+  if (musicTimeout) { clearInterval(musicTimeout); musicTimeout = null; }
 }
 
 function toggleMusic() {
@@ -757,50 +869,46 @@ function triggerParticles(prev, curr) {
   }
 }
 
-// ── Kill feed ─────────────────────────────────────────────────────────────────
-const eventLog = [];
-const EVENT_MAX   = 5;
-const EVENT_LIFE  = 6000; // ms
+// ── Kill feed (DOM-based live stream style) ──────────────────────────────────
+const FEED_MAX  = 30;
+const FEED_FADE = 15000; // ms before fade out
 
 socket.on('game_event', evt => {
-  let text = '';
+  let html = '';
   switch (evt.type) {
-    case 'steal':   text = `${evt.actor} stole from ${evt.victim}`; break;
-    case 'deposit': text = `${evt.actor} deposited${evt.count > 1 ? ' x' + evt.count : ''}`; break;
-    case 'boost':   text = `${evt.actor} picked up ⚡`; break;
-    case 'shield':  text = `${evt.actor} picked up 🛡️`; break;
-    case 'bounce':  text = `${evt.actor} bounced ${evt.victim}`; break;
+    case 'steal':
+      html = `<span class="feed-actor" style="color:${evt.actorColor}">${escHtml(evt.actor)}</span> stole from <span class="feed-actor" style="color:${evt.victimColor}">${escHtml(evt.victim)}</span>`;
+      break;
+    case 'deposit':
+      html = `<span class="feed-actor" style="color:${evt.actorColor}">${escHtml(evt.actor)}</span> deposited${evt.count > 1 ? ' x' + evt.count : ''}`;
+      break;
+    case 'boost':
+      html = `<span class="feed-actor" style="color:${evt.actorColor}">${escHtml(evt.actor)}</span> picked up ⚡`;
+      break;
+    case 'shield':
+      html = `<span class="feed-actor" style="color:${evt.actorColor}">${escHtml(evt.actor)}</span> picked up 🛡️`;
+      break;
+    case 'bounce':
+      html = `<span class="feed-actor" style="color:${evt.actorColor}">${escHtml(evt.actor)}</span> bounced <span class="feed-actor" style="color:${evt.victimColor}">${escHtml(evt.victim)}</span>`;
+      break;
     default: return;
   }
-  eventLog.push({ text, color: evt.actorColor, time: Date.now() });
-  if (eventLog.length > EVENT_MAX) eventLog.shift();
-});
 
-function renderEventLog() {
-  const now = Date.now();
-  const fontSize = Math.max(Math.round(TILE * 0.45), 10);
-  ctx.font         = `${fontSize}px sans-serif`;
-  ctx.textAlign    = 'left';
-  ctx.textBaseline = 'bottom';
+  const el = document.createElement('div');
+  el.className = 'feed-item';
+  el.innerHTML = html;
+  feedList.appendChild(el);
+  feedList.scrollTop = feedList.scrollHeight;
 
-  let y = SIZE - 8;
-  for (let i = eventLog.length - 1; i >= 0; i--) {
-    const e   = eventLog[i];
-    const age = now - e.time;
-    if (age > EVENT_LIFE) { eventLog.splice(i, 1); continue; }
-    const alpha = age < 4000 ? 1 : 1 - (age - 4000) / 2000;
+  // Fade old items
+  setTimeout(() => { el.classList.add('feed-fade'); }, FEED_FADE);
+  setTimeout(() => { el.remove(); }, FEED_FADE + 600);
 
-    // Background pill
-    const tw = ctx.measureText(e.text).width;
-    ctx.fillStyle = `rgba(0,0,0,${0.5 * alpha})`;
-    ctx.fillRect(6, y - fontSize - 2, tw + 10, fontSize + 6);
-
-    // Text
-    ctx.fillStyle = e.color ? e.color.replace(')', `,${alpha})`) .replace('hsl(', 'hsla(') : `rgba(255,255,255,${alpha})`;
-    ctx.fillText(e.text, 11, y);
-    y -= fontSize + 8;
+  // Cap total items
+  while (feedList.children.length > FEED_MAX) {
+    feedList.firstChild.remove();
   }
-}
+});
 
 // ── Util ──────────────────────────────────────────────────────────────────────
 function escHtml(str) {

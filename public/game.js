@@ -290,6 +290,29 @@ function renderEnd() {
   endWaitEl.style.display  = iAmHost ? 'none' : '';
 }
 
+// ── Smooth movement interpolation ────────────────────────────────────────────
+const visualPos = {}; // playerId -> { x, y }
+const LERP_SPEED = 0.25; // 0-1, higher = snappier
+
+function lerp(a, b, t) { return a + (b - a) * t; }
+
+function getVisualPos(p) {
+  if (!visualPos[p.id]) {
+    visualPos[p.id] = { x: p.x, y: p.y };
+  }
+  const v = visualPos[p.id];
+  // If player teleported (bounce), snap immediately
+  const dist = Math.abs(p.x - v.x) + Math.abs(p.y - v.y);
+  if (dist > 3) {
+    v.x = p.x;
+    v.y = p.y;
+  } else {
+    v.x = lerp(v.x, p.x, LERP_SPEED);
+    v.y = lerp(v.y, p.y, LERP_SPEED);
+  }
+  return v;
+}
+
 // ── Canvas render ─────────────────────────────────────────────────────────────
 function renderGame() {
   if (!state) return;
@@ -377,7 +400,8 @@ function renderGame() {
 
   // ── Snorlax ──
   if (state.snorlax && snorlaxImg.complete) {
-    ctx.drawImage(snorlaxImg, state.snorlax.x * TILE, state.snorlax.y * TILE, TILE * 2, TILE * 2);
+    const sv = getVisualPos({ id: '_snorlax', x: state.snorlax.x, y: state.snorlax.y });
+    ctx.drawImage(snorlaxImg, sv.x * TILE, sv.y * TILE, TILE * 2, TILE * 2);
   }
 
   // ── Power-ups on map ──
@@ -425,10 +449,12 @@ function renderGame() {
     // Alicia phantom: invisible to others when not carrying
     if (p.phantom && !isMe) continue;
 
+    // Smooth position interpolation
+    const vp  = getVisualPos(p);
     // Carry bob: gentle sine offset on y
     const bob = p.carrying ? Math.sin(now / 180) * 3 : 0;
-    const cx  = p.x * TILE + TILE / 2;
-    const cy  = p.y * TILE + TILE / 2 + bob;
+    const cx  = vp.x * TILE + TILE / 2;
+    const cy  = vp.y * TILE + TILE / 2 + bob;
     const r   = TILE * 0.36;
 
     // Glow — priority: shield (purple) > speed boost (cyan) > default

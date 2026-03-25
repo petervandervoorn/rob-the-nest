@@ -4,9 +4,10 @@ let GRID = 21;
 let TILE = 32;
 let SIZE = GRID * TILE;
 
-let myId      = null;
-let state     = null;
-let prevState = null;
+let myId        = null;
+let state       = null;
+let prevState   = null;
+let isSpectating = false;
 
 // ── DOM refs ─────────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
@@ -83,6 +84,8 @@ socket.on('promoted_to_host', () => { if (state) renderLobby(); });
 
 socket.on('err', msg => { errMsg.textContent = msg; });
 
+socket.on('spectating', () => { isSpectating = true; });
+
 socket.on('state_update', s => {
   prevState = state;
   state     = s;
@@ -101,7 +104,10 @@ socket.on('state_update', s => {
   playSounds(prevState, s);
   triggerParticles(prevState, s);
 
-  if      (s.phase === 'lobby')     { show('lobby'); renderLobby(); }
+  if (s.phase === 'lobby') {
+    isSpectating = false;  // Can join next round
+    show('lobby'); renderLobby();
+  }
   else if (s.phase === 'countdown') { show('game');  renderHUD(); $('hud').style.maxWidth = SIZE + 'px'; }
   else if (s.phase === 'playing')   { show('game');  renderHUD(); $('hud').style.maxWidth = SIZE + 'px'; }
   else if (s.phase === 'ended')     { show('end');   renderEnd(); }
@@ -120,6 +126,7 @@ const KEYS = {
 document.addEventListener('keydown', e => {
   const dir = KEYS[e.key];
   if (!dir || state?.phase !== 'playing') return;
+  if (!myId || !state.players[myId]) return; // Spectators can't move
   e.preventDefault();
   const now = Date.now();
   // Mirror server: Pete has 125ms base cooldown; halve when speed-boosted
@@ -197,6 +204,12 @@ function renderHUD() {
   if (sorted.length > TOP_N) {
     html += `<span class="score-total">(${sorted.length} players)</span>`;
   }
+  if (!myId || !state.players[myId]) {
+    html += `<span class="spectator-badge">Spectating</span>`;
+  }
+  if (state.spectators > 0) {
+    html += `<span class="spectator-count">${state.spectators} watching</span>`;
+  }
   scoresEl.innerHTML = html;
 }
 
@@ -234,8 +247,10 @@ function renderEnd() {
 
   finalEl.innerHTML = heading + '<ol>' + listHtml + '</ol>';
 
-  const iAmHost        = myId === state.hostId;
+  const iAmHost   = myId === state.hostId;
+  const isViewing = !myId || !state.players[myId];
   restartBtn.style.display = iAmHost ? '' : 'none';
+  endWaitEl.textContent    = isViewing ? 'Waiting for next round…' : 'Waiting for host to restart…';
   endWaitEl.style.display  = iAmHost ? 'none' : '';
 }
 
@@ -537,24 +552,28 @@ function playGameEnd() {
 }
 
 function playSounds(prev, curr) {
-  if (!prev || !myId) return;
-  const me     = curr.players[myId];
-  const prevMe = prev.players[myId];
+  if (!prev) return;
 
-  if (me && prevMe) {
-    if (!prevMe.carrying && me.carrying)
-      playSteal();
-    if (prevMe.carrying && !me.carrying && curr.phase === 'playing')
-      playDeposit();
-    if (me.speedBoostExpiry > Date.now() && !(prevMe.speedBoostExpiry > Date.now()))
-      playBoost();
-    if (me.shieldExpiry > Date.now() && !(prevMe.shieldExpiry > Date.now()))
-      playShield();
-    // Detect a bounce: position jumped more than 3 tiles in one update
-    const dist = Math.abs(me.x - prevMe.x) + Math.abs(me.y - prevMe.y);
-    if (dist > 3 && curr.phase === 'playing')
-      playBounce();
+  // Player-specific sounds (only for actual players)
+  if (myId) {
+    const me     = curr.players[myId];
+    const prevMe = prev.players[myId];
+    if (me && prevMe) {
+      if (!prevMe.carrying && me.carrying)
+        playSteal();
+      if (prevMe.carrying && !me.carrying && curr.phase === 'playing')
+        playDeposit();
+      if (me.speedBoostExpiry > Date.now() && !(prevMe.speedBoostExpiry > Date.now()))
+        playBoost();
+      if (me.shieldExpiry > Date.now() && !(prevMe.shieldExpiry > Date.now()))
+        playShield();
+      const dist = Math.abs(me.x - prevMe.x) + Math.abs(me.y - prevMe.y);
+      if (dist > 3 && curr.phase === 'playing')
+        playBounce();
+    }
   }
+
+  // Game-wide sounds (everyone including spectators)
 
   // Enter last-30-seconds zone
   if (prev.timer > 30 && curr.timer <= 30 && curr.phase === 'playing')

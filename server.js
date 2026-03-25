@@ -259,6 +259,7 @@ function snapshot() {
     gridSize:       state.gridSize,
     tileSize:       state.tileSize,
     countdownTimer: state.countdownTimer,
+    spectators:     io.sockets.sockets.size - Object.keys(state.players).length,
   };
 }
 
@@ -389,13 +390,16 @@ function startGameTimers() {
 io.on('connection', socket => {
   console.log('connect', socket.id);
 
+  // Send current state immediately so spectators see the board
+  socket.emit('state_update', snapshot());
+
   // JOIN
   socket.on('join', ({ name: rawName, character: rawChar } = {}) => {
     const name      = String(rawName ?? '').trim().slice(0, 16) || 'Player';
     const character = VALID_CHARACTERS.has(rawChar) ? rawChar : 'pete';
 
     if (state.phase !== 'lobby')
-      return socket.emit('err', 'Game already in progress');
+      return socket.emit('spectating');
     if (Object.keys(state.players).length >= MAX_PLAYERS)
       return socket.emit('err', `Game is full (max ${MAX_PLAYERS})`);
     if (Object.values(state.players).some(p => p.name === name))

@@ -290,3 +290,21 @@ input[type="number"]:focus { outline: none; border-color: #e74c3c; }
 .score-total { color: #666; font-size: 0.75em; margin-left: 0.5rem; }
 .end-sep     { color: #555; list-style: none; padding: 0.2rem 0; }
 .end-total   { color: #666; list-style: none; font-size: 0.9em; padding: 0.4rem 0; }
+
+/* ── Spectator ──────────────────────────────────────────────────────────── */
+.spectator-badge {
+  color: #a78bfa;
+  font-size: 0.8em;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border: 1px solid #a78bfa44;
+  border-radius: 4px;
+  background: #a78bfa15;
+}
+.spectator-count {
+  color: #666;
+  font-size: 0.75em;
+  margin-left: 0.5rem;
+}

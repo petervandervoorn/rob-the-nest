@@ -11,7 +11,7 @@ body {
 }
 
 /* ── Screens ─────────────────────────────────────────────────────────────── */
-.screen { text-align: center; padding: 2rem 1.5rem; max-width: 720px; }
+.screen { text-align: center; padding: 2rem 1.5rem; max-width: 800px; }
 
 h1 {
   font-size: 2.8rem;
@@ -29,34 +29,41 @@ h1 {
   margin-inline: auto;
 }
 
-/* ── Emoji picker ────────────────────────────────────────────────────────── */
-#emoji-picker {
+/* ── Character picker ────────────────────────────────────────────────────── */
+#char-picker {
   display: flex;
-  flex-wrap: wrap;
   justify-content: center;
-  gap: 6px;
-  max-width: 340px;
+  gap: 12px;
   margin: 0 auto 1.2rem;
 }
 
-.emoji-opt {
-  font-size: 1.4rem;
-  width: 42px;
-  height: 42px;
-  border-radius: 8px;
+.char-opt {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px;
+  border-radius: 10px;
   border: 2px solid transparent;
   background: #1a1a2e;
   cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   transition: border-color 0.15s, background 0.15s, transform 0.1s;
-  padding: 0;
-  line-height: 1;
 }
-.emoji-opt:hover              { background: #252545; transform: scale(1.1); }
-.emoji-opt.selected           { border-color: #e74c3c; background: #2d1525; }
-.emoji-opt:disabled           { opacity: 0.25; cursor: not-allowed; transform: none; }
+.char-opt img {
+  width: 48px;
+  height: 48px;
+  image-rendering: pixelated;
+}
+.char-opt span {
+  font-size: 0.75rem;
+  color: #888;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.char-opt:hover              { background: #252545; transform: scale(1.05); }
+.char-opt.selected           { border-color: #e74c3c; background: #2d1525; }
+.char-opt.selected span      { color: #e74c3c; }
 
 /* ── Join form ───────────────────────────────────────────────────────────── */
 #join-form {
@@ -103,6 +110,8 @@ button:active { transform: scale(0.97); }
 #player-list-wrap {
   margin: 1.2rem auto;
   max-width: 280px;
+  max-height: 300px;
+  overflow-y: auto;
   text-align: left;
 }
 #player-list-wrap h3 {
@@ -121,8 +130,11 @@ button:active { transform: scale(0.97); }
   font-size: 1rem;
   font-weight: 600;
 }
-.p-emoji { font-size: 1.2rem; line-height: 1; }
+.p-avatar { width: 20px; height: 20px; image-rendering: pixelated; vertical-align: middle; }
+.p-rank  { font-size: 0.8rem; color: #666; min-width: 2em; }
 .crown   { font-size: 0.8rem; }
+.score-avatar { width: 16px; height: 16px; image-rendering: pixelated; vertical-align: middle; }
+.winner-avatar { width: 32px; height: 32px; image-rendering: pixelated; vertical-align: middle; }
 
 /* ── Settings panel ──────────────────────────────────────────────────────── */
 #settings-panel {
@@ -195,7 +207,7 @@ input[type="number"]:focus { outline: none; border-color: #e74c3c; }
   align-items: center;
   gap: 1.5rem;
   width: 100%;
-  max-width: 672px;
+  max-width: 780px;
 }
 
 #timer {
@@ -232,6 +244,16 @@ input[type="number"]:focus { outline: none; border-color: #e74c3c; }
   font-size: 0.8em;
   font-weight: 700;
 }
+.camp-badge {
+  color: #e74c3c;
+  font-size: 0.8em;
+  font-weight: 700;
+  animation: campflash 0.6s infinite alternate;
+}
+@keyframes campflash {
+  from { opacity: 1; }
+  to   { opacity: 0.4; }
+}
 
 #canvas {
   display: block;
@@ -262,3 +284,9 @@ input[type="number"]:focus { outline: none; border-color: #e74c3c; }
 #final li strong { font-size: 1.2em; }
 
 #end-wait { color: #666; font-size: 0.9rem; margin-top: 0.5rem; }
+
+/* ── Score HUD helpers ──────────────────────────────────────────────────── */
+.score-sep   { color: #555; font-size: 0.8em; margin: 0 0.3rem; }
+.score-total { color: #666; font-size: 0.75em; margin-left: 0.5rem; }
+.end-sep     { color: #555; list-style: none; padding: 0.2rem 0; }
+.end-total   { color: #666; list-style: none; font-size: 0.9em; padding: 0.4rem 0; }

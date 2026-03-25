@@ -19,8 +19,10 @@ const DEFAULT_ITEMS    = 10;
 // ── Tier system ───────────────────────────────────────────────────────────────
 // tileSize is sent to the client so the canvas scales to ~680px regardless of tier
 const TIERS = [
-  { maxPlayers:  8, gridSize: 21, tileSize: 32, obstacles: 18 },
-  { maxPlayers: 20, gridSize: 31, tileSize: 22, obstacles: 35 },
+  { maxPlayers:   8, gridSize: 21, tileSize: 32, obstacles: 18 },
+  { maxPlayers:  20, gridSize: 31, tileSize: 22, obstacles: 35 },
+  { maxPlayers:  50, gridSize: 41, tileSize: 19, obstacles: 55 },
+  { maxPlayers: 100, gridSize: 55, tileSize: 14, obstacles: 75 },
 ];
 const MAX_PLAYERS = TIERS[TIERS.length - 1].maxPlayers;
 
@@ -52,18 +54,12 @@ function assignPositions(tier) {
   }
 }
 
-const COLORS = [
-  '#e74c3c', '#3498db', '#2ecc71', '#f39c12',
-  '#9b59b6', '#1abc9c', '#e67e22', '#e91e63',
-  '#00bcd4', '#ff5722', '#8bc34a', '#673ab7',
-  '#ff9800', '#009688', '#ef5350', '#1e88e5',
-  '#66bb6a', '#ff4081', '#fdd835', '#8d6e63',
-];
+// Golden-angle HSL spacing for max visual distinction across 100 players
+const COLORS = Array.from({ length: 100 }, (_, i) =>
+  `hsl(${Math.round(i * 137.5) % 360}, 70%, 55%)`
+);
 
-const VALID_EMOJIS = new Set([
-  '🦊','🐻','🐸','🦄','🐙','🤖','👻','🐵',
-  '🐯','🦁','🐺','🦅','🐢','🦈','🦋','🎭',
-]);
+const VALID_CHARACTERS = new Set(['pete', 'francis', 'alicia', 'nigel', 'scotland', 'chardi']);
 
 const DIR_DELTA = {
   up:    { dx:  0, dy: -1 },
@@ -131,19 +127,17 @@ function moveSnorlax() {
     [dirs[i], dirs[j]] = [dirs[j], dirs[i]];
   }
 
-  const obstacles = new Set(state.obstacles.map(o => `${o.x},${o.y}`));
-  const bases     = new Set(Object.values(state.players).map(p => `${p.baseX},${p.baseY}`));
-  const players   = new Set(Object.values(state.players).map(p => `${p.x},${p.y}`));
-  const current   = new Set([`${sx},${sy}`,`${sx+1},${sy}`,`${sx},${sy+1}`,`${sx+1},${sy+1}`]);
+  const bases   = new Set(Object.values(state.players).map(p => `${p.baseX},${p.baseY}`));
+  const current = new Set([`${sx},${sy}`,`${sx+1},${sy}`,`${sx},${sy+1}`,`${sx+1},${sy+1}`]);
 
   for (const { dx, dy } of dirs) {
     const nx = sx + dx, ny = sy + dy;
     if (nx < 0 || nx > g - 2 || ny < 0 || ny > g - 2) continue;
     const newTiles = [`${nx},${ny}`,`${nx+1},${ny}`,`${nx},${ny+1}`,`${nx+1},${ny+1}`];
-    const blocked  = newTiles.some(t => !current.has(t) && (obstacles.has(t) || bases.has(t) || players.has(t)));
+    const blocked  = newTiles.some(t => !current.has(t) && (state.obstacleSet.has(t) || bases.has(t) || state.posMap.has(t)));
     if (!blocked) {
       state.snorlax = { x: nx, y: ny };
-      io.emit('state_update', snapshot());
+      state.dirty = true;
       return;
     }
   }
@@ -151,23 +145,72 @@ function moveSnorlax() {
 
 function makeState() {
   return {
-    phase:     'lobby',
-    players:   {},
-    timer:     DEFAULT_DURATION,
-    hostId:    null,
-    nextSlot:  0,
-    powerUp:   null,
-    shieldUp:  null,
-    obstacles: [],
-    snorlax:   null,
-    gridSize:  TIERS[0].gridSize,
-    tileSize:  TIERS[0].tileSize,
-    settings:  { duration: DEFAULT_DURATION, startingItems: DEFAULT_ITEMS },
+    phase:        'lobby',
+    players:      {},
+    timer:        DEFAULT_DURATION,
+    hostId:       null,
+    nextSlot:     0,
+    powerUp:      null,
+    shieldUp:     null,
+    obstacles:    [],
+    obstacleSet:  new Set(),
+    posMap:       new Map(),   // "x,y" -> player id
+    snorlax:      null,
+    droppedItems: [],
+    dirty:        false,
+    gridSize:     TIERS[0].gridSize,
+    tileSize:     TIERS[0].tileSize,
+    settings:     { duration: DEFAULT_DURATION, startingItems: DEFAULT_ITEMS },
   };
+}
+
+function spawnDroppedItem(nearX, nearY) {
+  const g       = state.gridSize;
+  const blocked = new Set();
+  for (const o of state.obstacles) blocked.add(`${o.x},${o.y}`);
+  for (const p of Object.values(state.players)) {
+    blocked.add(`${p.x},${p.y}`);
+    blocked.add(`${p.baseX},${p.baseY}`);
+  }
+  if (state.snorlax) {
+    const { x: sx, y: sy } = state.snorlax;
+    for (let dx = 0; dx <= 1; dx++)
+      for (let dy = 0; dy <= 1; dy++)
+        blocked.add(`${sx + dx},${sy + dy}`);
+  }
+  for (const d of state.droppedItems) blocked.add(`${d.x},${d.y}`);
+  if (state.powerUp)  blocked.add(`${state.powerUp.x},${state.powerUp.y}`);
+  if (state.shieldUp) blocked.add(`${state.shieldUp.x},${state.shieldUp.y}`);
+
+  // Try rings expanding outward from the base, starting far enough that
+  // the camper can't immediately nip out and reclaim the item
+  for (let r = 5; r <= 10; r++) {
+    const candidates = [];
+    for (let dx = -r; dx <= r; dx++) {
+      for (let dy = -r; dy <= r; dy++) {
+        if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue; // ring edge only
+        const x = nearX + dx, y = nearY + dy;
+        if (x < 0 || x >= g || y < 0 || y >= g) continue;
+        if (!blocked.has(`${x},${y}`)) candidates.push({ x, y });
+      }
+    }
+    if (candidates.length > 0) {
+      state.droppedItems.push(candidates[Math.floor(Math.random() * candidates.length)]);
+      return;
+    }
+  }
+
+  // Fallback: anywhere on the grid
+  for (let tries = 0; tries < 300; tries++) {
+    const x = Math.floor(Math.random() * g);
+    const y = Math.floor(Math.random() * g);
+    if (!blocked.has(`${x},${y}`)) { state.droppedItems.push({ x, y }); return; }
+  }
 }
 
 let state           = makeState();
 let ticker          = null;
+let gameTick        = null;
 let powerUpTimer    = null;
 let shieldUpTimer   = null;
 let snorlaxInterval = null;
@@ -178,7 +221,7 @@ function snapshot() {
     players[id] = {
       id:               p.id,
       name:             p.name,
-      emoji:            p.emoji,
+      character:        p.character,
       color:            p.color,
       x:                p.x,
       y:                p.y,
@@ -188,6 +231,7 @@ function snapshot() {
       baseItems:        p.baseItems,
       speedBoostExpiry: p.speedBoost,
       shieldExpiry:     p.shield,
+      campTicks:        p.campTicks,
     };
   }
   return {
@@ -195,12 +239,13 @@ function snapshot() {
     players,
     timer:     state.timer,
     hostId:    state.hostId,
-    powerUp:   state.powerUp,
-    shieldUp:  state.shieldUp,
-    obstacles: state.obstacles,
-    snorlax:   state.snorlax,
-    gridSize:  state.gridSize,
-    tileSize:  state.tileSize,
+    powerUp:      state.powerUp,
+    shieldUp:     state.shieldUp,
+    obstacles:    state.obstacles,
+    snorlax:      state.snorlax,
+    droppedItems: state.droppedItems,
+    gridSize:     state.gridSize,
+    tileSize:     state.tileSize,
   };
 }
 
@@ -244,7 +289,7 @@ function spawnPowerUp() {
   } while (blocked.has(`${x},${y}`) && tries < 300);
 
   state.powerUp = { x, y };
-  io.emit('state_update', snapshot());
+  state.dirty = true;
 }
 
 // ── Shield pickup ─────────────────────────────────────────────────────────────
@@ -268,7 +313,7 @@ function spawnShieldUp() {
   } while (blocked.has(`${x},${y}`) && tries < 300);
 
   state.shieldUp = { x, y };
-  io.emit('state_update', snapshot());
+  state.dirty = true;
 }
 
 // ── Socket ────────────────────────────────────────────────────────────────────
@@ -276,9 +321,9 @@ io.on('connection', socket => {
   console.log('connect', socket.id);
 
   // JOIN
-  socket.on('join', ({ name: rawName, emoji: rawEmoji } = {}) => {
-    const name  = String(rawName  ?? '').trim().slice(0, 16) || 'Player';
-    const emoji = VALID_EMOJIS.has(rawEmoji) ? rawEmoji : '🦊';
+  socket.on('join', ({ name: rawName, character: rawChar } = {}) => {
+    const name      = String(rawName ?? '').trim().slice(0, 16) || 'Player';
+    const character = VALID_CHARACTERS.has(rawChar) ? rawChar : 'pete';
 
     if (state.phase !== 'lobby')
       return socket.emit('err', 'Game already in progress');
@@ -292,7 +337,7 @@ io.on('connection', socket => {
     state.players[socket.id] = {
       id:         socket.id,
       name,
-      emoji,
+      character,
       color:      COLORS[slot % COLORS.length],
       x:          0,
       y:          0,
@@ -303,6 +348,7 @@ io.on('connection', socket => {
       speedBoost: 0,
       shield:     0,
       lastMove:   0,
+      campTicks:  0,
     };
 
     if (!state.hostId) state.hostId = socket.id;
@@ -331,12 +377,34 @@ io.on('connection', socket => {
     for (const p of Object.values(state.players)) p.baseItems = startingItems;
 
     state.obstacles = generateObstacles(state.players, tier.gridSize, tier.obstacles);
+    state.obstacleSet = new Set(state.obstacles.map(o => `${o.x},${o.y}`));
+
+    // Build position map from assigned positions
+    state.posMap.clear();
+    for (const p of Object.values(state.players)) {
+      state.posMap.set(`${p.x},${p.y}`, p.id);
+    }
+
     state.phase     = 'playing';
     state.timer     = duration;
     spawnSnorlax();
     snorlaxInterval = setInterval(moveSnorlax, 2000);
 
     ticker = setInterval(() => {
+      // Camping penalty: players within 2 tiles of own base lose items after 5s grace
+      for (const p of Object.values(state.players)) {
+        const dist = Math.abs(p.x - p.baseX) + Math.abs(p.y - p.baseY);
+        if (dist <= 2) {
+          p.campTicks++;
+          if (p.campTicks > 5 && p.campTicks % 3 === 0 && p.baseItems > 0) {
+            p.baseItems--;
+            spawnDroppedItem(p.baseX, p.baseY);
+          }
+        } else {
+          p.campTicks = 0;
+        }
+      }
+
       state.timer--;
       if (state.timer <= 0) {
         state.timer   = 0;
@@ -345,12 +413,21 @@ io.on('connection', socket => {
         state.shieldUp = null;
         state.snorlax  = null;
         clearInterval(ticker); ticker = null;
+        if (gameTick)        { clearInterval(gameTick);          gameTick        = null; }
         if (powerUpTimer)    { clearTimeout(powerUpTimer);      powerUpTimer    = null; }
         if (shieldUpTimer)   { clearTimeout(shieldUpTimer);     shieldUpTimer   = null; }
         if (snorlaxInterval) { clearInterval(snorlaxInterval);  snorlaxInterval = null; }
       }
       io.emit('state_update', snapshot());
     }, 1000);
+
+    // Fast game tick: batch-broadcast state changes at 10 Hz instead of per-move
+    gameTick = setInterval(() => {
+      if (state.dirty && state.phase === 'playing') {
+        io.emit('state_update', snapshot());
+        state.dirty = false;
+      }
+    }, 100);
 
     spawnPowerUp();
     spawnShieldUp();
@@ -375,36 +452,42 @@ io.on('connection', socket => {
     const ny = p.y + delta.dy;
 
     if (nx < 0 || nx >= state.gridSize || ny < 0 || ny >= state.gridSize) return;
-    if (state.obstacles.some(o => o.x === nx && o.y === ny)) return;
+    const nKey = `${nx},${ny}`;
+    if (state.obstacleSet.has(nKey)) return;
     if (state.snorlax && nx >= state.snorlax.x && nx <= state.snorlax.x + 1 &&
                          ny >= state.snorlax.y && ny <= state.snorlax.y + 1) return;
 
+    // Check if another player occupies the target tile via posMap
+    const occupantId = state.posMap.get(nKey);
+    const occupant   = occupantId && occupantId !== socket.id ? state.players[occupantId] : null;
+
     // Shield bounce: if the target tile holds a shielded player, send mover home
-    const shieldedTarget = Object.values(state.players).find(
-      q => q.id !== socket.id && q.x === nx && q.y === ny && q.shield > now
-    );
-    if (shieldedTarget) {
+    if (occupant && occupant.shield > now) {
+      const oldKey = `${p.x},${p.y}`;
       const spawn = findSpawnNear(p.baseX, p.baseY, socket.id);
+      state.posMap.delete(oldKey);
       p.x = spawn.x;  p.y = spawn.y;  p.lastMove = now;
-      io.emit('state_update', snapshot());
+      state.posMap.set(`${p.x},${p.y}`, socket.id);
+      state.dirty = true;
       return;
     }
 
     // If mover is shielded and walks into someone, bounce that player home
-    if (p.shield > now) {
-      const target = Object.values(state.players).find(
-        q => q.id !== socket.id && q.x === nx && q.y === ny
-      );
-      if (target) {
-        const spawn = findSpawnNear(target.baseX, target.baseY, target.id);
-        target.x = spawn.x;  target.y = spawn.y;
-        // fall through — mover takes the tile
-      }
-    } else if (Object.values(state.players).some(q => q.id !== socket.id && q.x === nx && q.y === ny)) {
+    if (occupant && p.shield > now) {
+      state.posMap.delete(nKey);
+      const spawn = findSpawnNear(occupant.baseX, occupant.baseY, occupant.id);
+      occupant.x = spawn.x;  occupant.y = spawn.y;
+      state.posMap.set(`${occupant.x},${occupant.y}`, occupant.id);
+      // fall through — mover takes the tile
+    } else if (occupant) {
       return;
     }
 
+    // Update posMap
+    const oldKey = `${p.x},${p.y}`;
+    state.posMap.delete(oldKey);
     p.x = nx;  p.y = ny;  p.lastMove = now;
+    state.posMap.set(nKey, socket.id);
 
     // Deposit at own base
     if (p.carrying && nx === p.baseX && ny === p.baseY) {
@@ -423,6 +506,15 @@ io.on('connection', socket => {
       }
     }
 
+    // Pick up dropped item
+    if (!p.carrying) {
+      const dropIdx = state.droppedItems.findIndex(d => d.x === nx && d.y === ny);
+      if (dropIdx !== -1) {
+        state.droppedItems.splice(dropIdx, 1);
+        p.carrying = true;
+      }
+    }
+
     // Pick up speed boost
     if (state.powerUp && nx === state.powerUp.x && ny === state.powerUp.y) {
       p.speedBoost  = now + BOOST_DURATION;
@@ -437,13 +529,14 @@ io.on('connection', socket => {
       shieldUpTimer  = setTimeout(spawnShieldUp, BOOST_RESPAWN);
     }
 
-    io.emit('state_update', snapshot());
+    state.dirty = true;
   });
 
   // RESTART
   socket.on('restart', () => {
     if (socket.id !== state.hostId || state.phase !== 'ended') return;
     if (ticker)          { clearInterval(ticker);          ticker          = null; }
+    if (gameTick)        { clearInterval(gameTick);        gameTick        = null; }
     if (powerUpTimer)    { clearTimeout(powerUpTimer);     powerUpTimer    = null; }
     if (shieldUpTimer)   { clearTimeout(shieldUpTimer);    shieldUpTimer   = null; }
     if (snorlaxInterval) { clearInterval(snorlaxInterval); snorlaxInterval = null; }
@@ -459,12 +552,22 @@ io.on('connection', socket => {
       p.speedBoost = 0;
       p.shield     = 0;
       p.lastMove   = 0;
+      p.campTicks  = 0;
     }
 
-    state.nextSlot  = Object.keys(state.players).length;
-    state.powerUp   = null;
-    state.shieldUp  = null;
-    state.obstacles = [];
+    // Rebuild posMap for new positions
+    state.posMap.clear();
+    for (const p of Object.values(state.players)) {
+      state.posMap.set(`${p.x},${p.y}`, p.id);
+    }
+
+    state.nextSlot      = Object.keys(state.players).length;
+    state.powerUp       = null;
+    state.shieldUp      = null;
+    state.droppedItems  = [];
+    state.obstacles     = [];
+    state.obstacleSet   = new Set();
+    state.dirty         = false;
     state.snorlax   = null;
     state.phase     = 'lobby';
     state.timer     = state.settings.duration;
@@ -474,8 +577,11 @@ io.on('connection', socket => {
   // DISCONNECT
   socket.on('disconnect', () => {
     console.log('disconnect', socket.id);
-    if (!state.players[socket.id]) return;
+    const p = state.players[socket.id];
+    if (!p) return;
 
+    // Remove from posMap
+    state.posMap.delete(`${p.x},${p.y}`);
     delete state.players[socket.id];
 
     if (state.hostId === socket.id) {
@@ -485,6 +591,7 @@ io.on('connection', socket => {
 
     if (Object.keys(state.players).length === 0) {
       if (ticker)          { clearInterval(ticker);          ticker          = null; }
+      if (gameTick)        { clearInterval(gameTick);        gameTick        = null; }
       if (powerUpTimer)    { clearTimeout(powerUpTimer);     powerUpTimer    = null; }
       if (shieldUpTimer)   { clearTimeout(shieldUpTimer);    shieldUpTimer   = null; }
       if (snorlaxInterval) { clearInterval(snorlaxInterval); snorlaxInterval = null; }

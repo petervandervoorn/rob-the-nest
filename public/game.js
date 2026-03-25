@@ -35,14 +35,22 @@ canvas.height = SIZE;
 const snorlaxImg = new Image();
 snorlaxImg.src   = '/snorlax.jpeg';
 
-// ── Emoji picker ─────────────────────────────────────────────────────────────
-let selectedEmoji = '🦊';
+// ── Character picker ─────────────────────────────────────────────────────────
+let selectedCharacter = 'pete';
 
-document.querySelectorAll('.emoji-opt').forEach(btn => {
+// Preload character images
+const characterImgs = {};
+for (const name of ['pete', 'francis', 'alicia', 'nigel', 'scotland', 'chardi']) {
+  const img = new Image();
+  img.src = `/characters/${name}.png`;
+  characterImgs[name] = img;
+}
+
+document.querySelectorAll('.char-opt').forEach(btn => {
   btn.addEventListener('click', () => {
-    document.querySelectorAll('.emoji-opt').forEach(b => b.classList.remove('selected'));
+    document.querySelectorAll('.char-opt').forEach(b => b.classList.remove('selected'));
     btn.classList.add('selected');
-    selectedEmoji = btn.dataset.emoji;
+    selectedCharacter = btn.dataset.character;
   });
 });
 
@@ -57,7 +65,7 @@ joinBtn.onclick = () => {
   const name = nameInput.value.trim();
   if (!name) return;
   errMsg.textContent = '';
-  socket.emit('join', { name, emoji: selectedEmoji });
+  socket.emit('join', { name, character: selectedCharacter });
 };
 nameInput.onkeydown = e => { if (e.key === 'Enter') joinBtn.onclick(); };
 
@@ -134,21 +142,13 @@ function renderLobby() {
 
   joinForm.style.display = joined ? 'none' : 'flex';
 
-  playerCount.textContent = `(${players.length}/8)`;
+  playerCount.textContent = `(${players.length})`;
   playerListEl.innerHTML  = players.map(p =>
     `<li style="color:${p.color}">
-       <span class="p-emoji">${p.emoji}</span>
+       <img class="p-avatar" src="/characters/${p.character}.png" alt="${p.character}" />
        ${escHtml(p.name)}${p.id === state.hostId ? ' <span class="crown">♛</span>' : ''}
      </li>`
   ).join('');
-
-  // Disable emojis already claimed by other players
-  const myEmoji = myId ? state.players[myId]?.emoji : null;
-  const taken   = new Set(players.map(p => p.emoji));
-  document.querySelectorAll('.emoji-opt').forEach(btn => {
-    const isMine = btn.dataset.emoji === myEmoji;
-    btn.disabled = !isMine && taken.has(btn.dataset.emoji);
-  });
 
   if (joined) {
     const iAmHost         = myId === state.hostId;
@@ -172,13 +172,29 @@ function renderHUD() {
   const now    = Date.now();
   const sorted = Object.values(state.players).sort((a, b) => b.baseItems - a.baseItems);
 
-  scoresEl.innerHTML = sorted.map(p => {
+  const TOP_N  = 5;
+  const myRank = sorted.findIndex(p => p.id === myId);
+  const shown  = sorted.slice(0, TOP_N);
+  const showMe = myRank >= TOP_N && myRank !== -1;
+
+  function scoreHtml(p, rank) {
     const boostLeft  = p.speedBoostExpiry > now ? Math.ceil((p.speedBoostExpiry - now) / 1000) : 0;
     const shieldLeft = p.shieldExpiry     > now ? Math.ceil((p.shieldExpiry     - now) / 1000) : 0;
+    const camping = p.campTicks > 5;
     return `<span class="score${p.id === myId ? ' me' : ''}" style="--c:${p.color}">
-      ${p.emoji} ${escHtml(p.name)} ${p.baseItems}${p.carrying ? ' 📦' : ''}${boostLeft ? ` <span class="boost-badge">⚡${boostLeft}s</span>` : ''}${shieldLeft ? ` <span class="shield-badge">🛡️${shieldLeft}s</span>` : ''}
+      #${rank + 1} <img class="score-avatar" src="/characters/${p.character}.png" alt="${p.character}" /> ${escHtml(p.name)} ${p.baseItems}${p.carrying ? ' 📦' : ''}${boostLeft ? ` <span class="boost-badge">⚡${boostLeft}s</span>` : ''}${shieldLeft ? ` <span class="shield-badge">🛡️${shieldLeft}s</span>` : ''}${camping ? ` <span class="camp-badge">⛺-1</span>` : ''}
     </span>`;
-  }).join('');
+  }
+
+  let html = shown.map((p, i) => scoreHtml(p, i)).join('');
+  if (showMe) {
+    html += `<span class="score-sep">···</span>`;
+    html += scoreHtml(sorted[myRank], myRank);
+  }
+  if (sorted.length > TOP_N) {
+    html += `<span class="score-total">(${sorted.length} players)</span>`;
+  }
+  scoresEl.innerHTML = html;
 }
 
 // ── End screen ────────────────────────────────────────────────────────────────
@@ -189,14 +205,31 @@ function renderEnd() {
 
   const heading = tied.length > 1
     ? `<h2 class="tie">It's a tie!</h2>`
-    : `<h2 style="color:${sorted[0].color}">${sorted[0].emoji} ${escHtml(sorted[0].name)} wins! 🎉</h2>`;
+    : `<h2 style="color:${sorted[0].color}"><img class="winner-avatar" src="/characters/${sorted[0].character}.png" /> ${escHtml(sorted[0].name)} wins!</h2>`;
 
-  finalEl.innerHTML = heading + '<ol>' + sorted.map(p =>
-    `<li style="color:${p.color}">
-       <span class="p-emoji">${p.emoji}</span>
+  const END_TOP = 10;
+  const myRank  = sorted.findIndex(p => p.id === myId);
+  const top     = sorted.slice(0, END_TOP);
+  const showMe  = myRank >= END_TOP && myRank !== -1;
+
+  function liHtml(p, rank) {
+    return `<li style="color:${p.color}">
+       <span class="p-rank">#${rank + 1}</span>
+       <img class="p-avatar" src="/characters/${p.character}.png" alt="${p.character}" />
        ${escHtml(p.name)} — <strong>${p.baseItems}</strong> items
-     </li>`
-  ).join('') + '</ol>';
+     </li>`;
+  }
+
+  let listHtml = top.map((p, i) => liHtml(p, i)).join('');
+  if (showMe) {
+    listHtml += `<li class="end-sep">···</li>`;
+    listHtml += liHtml(sorted[myRank], myRank);
+  }
+  if (sorted.length > END_TOP) {
+    listHtml += `<li class="end-total">${sorted.length} players total</li>`;
+  }
+
+  finalEl.innerHTML = heading + '<ol>' + listHtml + '</ol>';
 
   const iAmHost        = myId === state.hostId;
   restartBtn.style.display = iAmHost ? '' : 'none';
@@ -224,32 +257,57 @@ function renderGame() {
   }
 
   // ── Bases ──
+  const itemFont = `bold ${Math.max(Math.round(TILE * 0.55), 8)}px monospace`;
+  const nameFont = `${Math.max(Math.round(TILE * 0.4), 7)}px sans-serif`;
+
   for (const p of players) {
     const bx = p.baseX * TILE;
     const by = p.baseY * TILE;
+    const isMyBase = p.id === myId;
+    const camping  = p.campTicks > 5;
+
+    // Own base: pulsing gold beacon so you can always find it
+    if (isMyBase) {
+      const pulse = 0.5 + 0.5 * Math.sin(now / 300);
+      ctx.shadowColor = '#ffd700';
+      ctx.shadowBlur  = 18 + pulse * 24;
+      ctx.fillStyle   = `rgba(255,215,0,${0.12 + pulse * 0.15})`;
+      ctx.fillRect(bx - 2, by - 2, TILE + 4, TILE + 4);
+      ctx.shadowBlur  = 0;
+    }
+
+    // Camping: pulsing red warning glow
+    if (camping) {
+      const pulse = 0.5 + 0.5 * Math.sin(now / 200);
+      ctx.shadowColor = '#e74c3c';
+      ctx.shadowBlur  = 12 + pulse * 20;
+      ctx.fillStyle   = `rgba(231,76,60,${0.15 + pulse * 0.2})`;
+      ctx.fillRect(bx, by, TILE, TILE);
+      ctx.shadowBlur  = 0;
+    }
 
     // Glow fill
-    ctx.shadowColor = p.color;
-    ctx.shadowBlur  = 16;
-    ctx.fillStyle   = p.color + '30';
+    ctx.shadowColor = isMyBase ? '#ffd700' : p.color;
+    ctx.shadowBlur  = isMyBase ? 20 : 16;
+    ctx.fillStyle   = (isMyBase ? '#ffd700' : p.color) + '30';
     ctx.fillRect(bx, by, TILE, TILE);
     ctx.shadowBlur  = 0;
 
     // Border
-    ctx.strokeStyle = p.color;
-    ctx.lineWidth   = 2;
+    ctx.strokeStyle = isMyBase ? '#ffd700' : p.color;
+    ctx.lineWidth   = isMyBase ? 3 : 2;
     ctx.strokeRect(bx + 1, by + 1, TILE - 2, TILE - 2);
 
     // Item count
     ctx.fillStyle    = '#fff';
-    ctx.font         = 'bold 12px monospace';
+    ctx.font         = itemFont;
     ctx.textAlign    = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(p.baseItems, bx + TILE / 2, by + TILE / 2);
 
     // Base name label — flip side for edge bases so it stays on-canvas
-    ctx.fillStyle    = p.color;
-    ctx.font         = '9px sans-serif';
+    ctx.fillStyle    = isMyBase ? '#ffd700' : p.color;
+    ctx.font         = nameFont;
     ctx.textBaseline = p.baseY === 0 ? 'top' : 'bottom';
     const labelY     = p.baseY === 0 ? by + TILE + 2 : by - 2;
     ctx.fillText(p.name, bx + TILE / 2, labelY);
@@ -269,7 +327,7 @@ function renderGame() {
   }
 
   // ── Power-ups on map ──
-  ctx.font         = '20px serif';
+  ctx.font         = `${Math.max(Math.round(TILE * 0.9), 12)}px serif`;
   ctx.textAlign    = 'center';
   ctx.textBaseline = 'middle';
 
@@ -290,6 +348,17 @@ function renderGame() {
     ctx.shadowColor = '#a78bfa';
     ctx.shadowBlur  = 8 + pulse * 14;
     ctx.fillText('🛡️', px, py + 1);
+    ctx.shadowBlur  = 0;
+  }
+
+  // ── Dropped items (from camping penalty) ──
+  for (const d of state.droppedItems || []) {
+    const px    = d.x * TILE + TILE / 2;
+    const py    = d.y * TILE + TILE / 2;
+    const pulse = 0.5 + 0.5 * Math.sin(now / 350 + d.x + d.y);
+    ctx.shadowColor = '#ffffff';
+    ctx.shadowBlur  = 6 + pulse * 10;
+    ctx.fillText('📦', px, py + 1);
     ctx.shadowBlur  = 0;
   }
 
@@ -318,16 +387,17 @@ function renderGame() {
 
     ctx.shadowBlur = 0;
 
-    // Emoji
-    ctx.font         = `${Math.round(TILE * 0.58)}px serif`;
-    ctx.textAlign    = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(p.emoji, cx, cy + 1);
+    // Character sprite
+    const charImg = characterImgs[p.character];
+    if (charImg && charImg.complete) {
+      const s = TILE * 0.75;
+      ctx.drawImage(charImg, cx - s / 2, cy - s / 2, s, s);
+    }
 
     // Carrying indicator — small white dot top-right
     if (p.carrying) {
       ctx.beginPath();
-      ctx.arc(cx + r * 0.62, cy - r * 0.62, 4.5, 0, Math.PI * 2);
+      ctx.arc(cx + r * 0.62, cy - r * 0.62, Math.max(TILE * 0.14, 2.5), 0, Math.PI * 2);
       ctx.fillStyle   = '#fff';
       ctx.shadowColor = '#fff';
       ctx.shadowBlur  = 6;
@@ -337,7 +407,7 @@ function renderGame() {
 
     // Name label
     ctx.fillStyle    = 'rgba(255,255,255,0.85)';
-    ctx.font         = '9px sans-serif';
+    ctx.font         = nameFont;
     ctx.textAlign    = 'center';
     ctx.textBaseline = 'bottom';
     ctx.fillText(p.name, cx, cy - r - 3 + bob);

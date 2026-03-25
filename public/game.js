@@ -4,10 +4,11 @@ let GRID = 21;
 let TILE = 32;
 let SIZE = GRID * TILE;
 
-let myId        = null;
-let state       = null;
-let prevState   = null;
+let myId         = null;
+let state        = null;
+let prevState    = null;
 let isSpectating = false;
+let gameStartedAt = 0;  // timestamp when playing phase began
 
 // ── DOM refs ─────────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
@@ -128,7 +129,7 @@ socket.on('state_update', s => {
     stopMusic();
     show('lobby'); renderLobby();
   }
-  else if (s.phase === 'countdown') { playMusic(); show('game');  renderHUD(); renderLeaderboard(); $('hud').style.maxWidth = (SIZE + 420) + 'px'; $('feed').style.height = SIZE + 'px'; $('leaderboard').style.height = SIZE + 'px'; }
+  else if (s.phase === 'countdown') { gameStartedAt = Date.now(); playMusic(); show('game');  renderHUD(); renderLeaderboard(); $('hud').style.maxWidth = (SIZE + 420) + 'px'; $('feed').style.height = SIZE + 'px'; $('leaderboard').style.height = SIZE + 'px'; }
   else if (s.phase === 'playing')   { playMusic(); show('game');  renderHUD(); renderLeaderboard(); $('hud').style.maxWidth = (SIZE + 420) + 'px'; $('feed').style.height = SIZE + 'px'; $('leaderboard').style.height = SIZE + 'px'; }
   else if (s.phase === 'ended')     { stopMusic(); show('end');   renderEnd(); }
 });
@@ -288,6 +289,56 @@ function renderEnd() {
   restartBtn.style.display = iAmHost ? '' : 'none';
   endWaitEl.textContent    = isViewing ? 'Waiting for next round…' : 'Waiting for host to restart…';
   endWaitEl.style.display  = iAmHost ? 'none' : '';
+}
+
+// ── Ping system (find me / find base buttons) ────────────────────────────────
+const pings = []; // { gx, gy, color, startTime, duration }
+
+function pingMe() {
+  const me = myId && state?.players[myId];
+  if (!me) return;
+  pings.push({ gx: me.x, gy: me.y, color: '255,215,0', startTime: Date.now(), duration: 3000 });
+}
+
+function pingBase() {
+  const me = myId && state?.players[myId];
+  if (!me) return;
+  pings.push({ gx: me.baseX, gy: me.baseY, color: '100,255,150', startTime: Date.now(), duration: 3000 });
+}
+
+function renderPings() {
+  const now = Date.now();
+  for (let i = pings.length - 1; i >= 0; i--) {
+    const pg  = pings[i];
+    const age = (now - pg.startTime) / 1000;
+    if (age * 1000 > pg.duration) { pings.splice(i, 1); continue; }
+    const fade   = 1 - (age * 1000) / pg.duration;
+    const cx     = pg.gx * TILE + TILE / 2;
+    const cy     = pg.gy * TILE + TILE / 2;
+    const period = 0.7;
+
+    for (let r = 0; r < 3; r++) {
+      const offset = (r / 3) * period;
+      const ringT  = ((age + offset) % period) / period;
+      const ringR  = ringT * TILE * 5;
+      const alpha  = fade * (1 - ringT) * 0.8;
+      if (alpha <= 0) continue;
+      ctx.beginPath();
+      ctx.arc(cx, cy, ringR, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(${pg.color},${alpha})`;
+      ctx.lineWidth   = 3;
+      ctx.stroke();
+    }
+
+    // Center dot
+    ctx.beginPath();
+    ctx.arc(cx, cy, TILE * 0.25, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(${pg.color},${fade * 0.9})`;
+    ctx.shadowColor = `rgba(${pg.color},1)`;
+    ctx.shadowBlur  = 15;
+    ctx.fill();
+    ctx.shadowBlur  = 0;
+  }
 }
 
 // ── Smooth movement interpolation ────────────────────────────────────────────
@@ -457,6 +508,24 @@ function renderGame() {
     const cy  = vp.y * TILE + TILE / 2 + bob;
     const r   = TILE * 0.36;
 
+    // Locator beacon — expanding rings on your character at game start
+    const beaconAge = (now - gameStartedAt) / 1000;
+    if (isMe && beaconAge < 5) {
+      const fade    = 1 - beaconAge / 5;
+      const period  = 0.8;
+      const ring1   = ((beaconAge % period) / period) * TILE * 4;
+      const ring2   = (((beaconAge + period / 2) % period) / period) * TILE * 4;
+      for (const ringR of [ring1, ring2]) {
+        const ringAlpha = fade * (1 - ringR / (TILE * 4));
+        if (ringAlpha <= 0) continue;
+        ctx.beginPath();
+        ctx.arc(cx, cy, ringR, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(255,215,0,${ringAlpha * 0.7})`;
+        ctx.lineWidth   = 3;
+        ctx.stroke();
+      }
+    }
+
     // Glow — priority: shield (purple) > speed boost (cyan) > default
     ctx.shadowColor = shielded ? '#a78bfa' : boosted ? '#00e5ff' : p.color;
     ctx.shadowBlur  = (shielded || boosted) ? 22 : (isMe ? 18 : 8);
@@ -501,6 +570,44 @@ function renderGame() {
     ctx.textBaseline = 'bottom';
     ctx.fillText(p.name, cx, cy - r - 3 + bob);
   }
+
+  // ── Compass arrow to own base ──
+  const me = myId && state.players[myId];
+  if (me) {
+    const meVp = visualPos[myId] || me;
+    const dx   = me.baseX - meVp.x;
+    const dy   = me.baseY - meVp.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist > 4) {
+      const angle  = Math.atan2(dy, dx);
+      const arrowR = TILE * 1.8;
+      const meCx   = meVp.x * TILE + TILE / 2;
+      const meCy   = meVp.y * TILE + TILE / 2;
+      const ax     = meCx + Math.cos(angle) * arrowR;
+      const ay     = meCy + Math.sin(angle) * arrowR;
+      const pulse  = 0.6 + 0.4 * Math.sin(now / 400);
+
+      ctx.save();
+      ctx.translate(ax, ay);
+      ctx.rotate(angle);
+      ctx.globalAlpha = pulse;
+      ctx.fillStyle   = '#ffd700';
+      ctx.shadowColor = '#ffd700';
+      ctx.shadowBlur  = 10;
+      ctx.beginPath();
+      ctx.moveTo(TILE * 0.35, 0);
+      ctx.lineTo(-TILE * 0.15, -TILE * 0.2);
+      ctx.lineTo(-TILE * 0.15, TILE * 0.2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.shadowBlur  = 0;
+      ctx.globalAlpha = 1;
+      ctx.restore();
+    }
+  }
+
+  // ── Pings ──
+  renderPings();
 
   // ── Particles ──
   updateAndRenderParticles();

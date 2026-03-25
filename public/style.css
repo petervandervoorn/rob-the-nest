@@ -423,14 +423,15 @@ input[type="number"]:focus { outline: none; border-color: #e74c3c; }
 }
 
 /* ── Music toggle ───────────────────────────────────────────────────────── */
-#music-btn {
+#find-me-btn, #find-base-btn, #music-btn {
   background: #1a1a2e;
   border: 1px solid #2e2e4a;
-  font-size: 1.1rem;
+  font-size: 0.8rem;
   padding: 4px 8px;
   border-radius: 6px;
   cursor: pointer;
-  margin-left: auto;
   min-width: 36px;
+  color: #ccc;
 }
-#music-btn:hover { background: #252545; }
+#find-me-btn { margin-left: auto; }
+#find-me-btn:hover, #find-base-btn:hover, #music-btn:hover { background: #252545; }

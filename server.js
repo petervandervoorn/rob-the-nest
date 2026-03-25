@@ -30,17 +30,36 @@ function getTier(playerCount) {
   return TIERS.find(t => playerCount <= t.maxPlayers) ?? TIERS[TIERS.length - 1];
 }
 
-// Evenly space N bases around the perimeter of a gridSize×gridSize grid
+// Scatter N bases throughout the grid with minimum distance between them
 function generateBasePositions(count, gridSize) {
-  const max       = gridSize - 1;
-  const perimeter = 4 * max;
-  return Array.from({ length: count }, (_, i) => {
-    const t = (i / count) * perimeter;
-    if      (t <= max)     return { x: Math.round(t),               y: 0   };
-    else if (t <= 2 * max) return { x: max,                          y: Math.round(t - max)       };
-    else if (t <= 3 * max) return { x: max - Math.round(t - 2*max), y: max };
-    else                   return { x: 0,                            y: max - Math.round(t - 3*max) };
-  });
+  const margin  = 2; // stay off the very edge
+  const minDist = Math.max(Math.floor(gridSize / Math.ceil(Math.sqrt(count))) - 1, 3);
+  const positions = [];
+
+  for (let attempt = 0; attempt < 5000 && positions.length < count; attempt++) {
+    const x = margin + Math.floor(Math.random() * (gridSize - margin * 2));
+    const y = margin + Math.floor(Math.random() * (gridSize - margin * 2));
+    const tooClose = positions.some(p =>
+      Math.abs(p.x - x) + Math.abs(p.y - y) < minDist
+    );
+    if (!tooClose) positions.push({ x, y });
+  }
+
+  // Fallback: if we couldn't place enough (very unlikely), fill with grid pattern
+  if (positions.length < count) {
+    const cols = Math.ceil(Math.sqrt(count));
+    const step = Math.floor((gridSize - margin * 2) / cols);
+    for (let i = positions.length; i < count; i++) {
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      positions.push({
+        x: margin + col * step + Math.floor(Math.random() * Math.max(step - 2, 1)),
+        y: margin + row * step + Math.floor(Math.random() * Math.max(step - 2, 1)),
+      });
+    }
+  }
+
+  return positions;
 }
 
 // Assign base positions to all current players based on tier (used at start + restart)

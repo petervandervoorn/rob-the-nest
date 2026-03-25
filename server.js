@@ -61,6 +61,14 @@ const COLORS = Array.from({ length: 100 }, (_, i) =>
 
 const VALID_CHARACTERS = new Set(['pete', 'francis', 'alicia', 'nigel', 'scotland', 'chardi']);
 
+// ── Character abilities (hidden from players) ────────────────────────────────
+// pete:     swift feet — 125ms move cooldown instead of 150ms
+// francis:  double carry — can carry 2 items at once
+// alicia:   phantom — invisible to others when not carrying
+// nigel:    fortified base — takes 2 visits to steal (crack + steal)
+// scotland: extended boost — speed/shield duration 50% longer
+// chardi:   quick hands — steals 2 items, keeps 1, drops 1
+
 const DIR_DELTA = {
   up:    { dx:  0, dy: -1 },
   down:  { dx:  0, dy:  1 },
@@ -157,10 +165,12 @@ function makeState() {
     posMap:       new Map(),   // "x,y" -> player id
     snorlax:      null,
     droppedItems: [],
-    dirty:        false,
-    gridSize:     TIERS[0].gridSize,
-    tileSize:     TIERS[0].tileSize,
-    settings:     { duration: DEFAULT_DURATION, startingItems: DEFAULT_ITEMS },
+    baseCracked:  {},     // nigel ability: { nigelPlayerId: { by, at } }
+    dirty:          false,
+    countdownTimer: 0,
+    gridSize:       TIERS[0].gridSize,
+    tileSize:       TIERS[0].tileSize,
+    settings:       { duration: DEFAULT_DURATION, startingItems: DEFAULT_ITEMS },
   };
 }
 
@@ -211,6 +221,7 @@ function spawnDroppedItem(nearX, nearY) {
 let state           = makeState();
 let ticker          = null;
 let gameTick        = null;
+let countdownTick   = null;
 let powerUpTimer    = null;
 let shieldUpTimer   = null;
 let snorlaxInterval = null;
@@ -232,6 +243,7 @@ function snapshot() {
       speedBoostExpiry: p.speedBoost,
       shieldExpiry:     p.shield,
       campTicks:        p.campTicks,
+      phantom:          p.character === 'alicia' && p.carrying === 0,
     };
   }
   return {
@@ -244,8 +256,9 @@ function snapshot() {
     obstacles:    state.obstacles,
     snorlax:      state.snorlax,
     droppedItems: state.droppedItems,
-    gridSize:     state.gridSize,
-    tileSize:     state.tileSize,
+    gridSize:       state.gridSize,
+    tileSize:       state.tileSize,
+    countdownTimer: state.countdownTimer,
   };
 }
 
@@ -316,6 +329,62 @@ function spawnShieldUp() {
   state.dirty = true;
 }
 
+// ── Game event emitter (kill feed) ───────────────────────────────────────────
+function emitEvent(type, data) {
+  io.emit('game_event', { type, ...data, t: Date.now() });
+}
+
+// ── Start game timers (called after countdown finishes) ──────────────────────
+function startGameTimers() {
+  snorlaxInterval = setInterval(moveSnorlax, 2000);
+
+  ticker = setInterval(() => {
+    for (const p of Object.values(state.players)) {
+      const dist = Math.abs(p.x - p.baseX) + Math.abs(p.y - p.baseY);
+      if (dist <= 2) {
+        p.campTicks++;
+        if (p.campTicks > 5 && p.campTicks % 3 === 0 && p.baseItems > 0) {
+          p.baseItems--;
+          spawnDroppedItem(p.baseX, p.baseY);
+        }
+      } else {
+        p.campTicks = 0;
+      }
+    }
+
+    // Expire old base cracks (Nigel ability)
+    const crackNow = Date.now();
+    for (const [id, crack] of Object.entries(state.baseCracked)) {
+      if (crackNow - crack.at >= 3000) delete state.baseCracked[id];
+    }
+
+    state.timer--;
+    if (state.timer <= 0) {
+      state.timer   = 0;
+      state.phase   = 'ended';
+      state.powerUp  = null;
+      state.shieldUp = null;
+      state.snorlax  = null;
+      clearInterval(ticker); ticker = null;
+      if (gameTick)        { clearInterval(gameTick);          gameTick        = null; }
+      if (powerUpTimer)    { clearTimeout(powerUpTimer);      powerUpTimer    = null; }
+      if (shieldUpTimer)   { clearTimeout(shieldUpTimer);     shieldUpTimer   = null; }
+      if (snorlaxInterval) { clearInterval(snorlaxInterval);  snorlaxInterval = null; }
+    }
+    io.emit('state_update', snapshot());
+  }, 1000);
+
+  gameTick = setInterval(() => {
+    if (state.dirty && state.phase === 'playing') {
+      io.emit('state_update', snapshot());
+      state.dirty = false;
+    }
+  }, 100);
+
+  spawnPowerUp();
+  spawnShieldUp();
+}
+
 // ── Socket ────────────────────────────────────────────────────────────────────
 io.on('connection', socket => {
   console.log('connect', socket.id);
@@ -343,7 +412,7 @@ io.on('connection', socket => {
       y:          0,
       baseX:      0,
       baseY:      0,
-      carrying:   false,
+      carrying:   0,
       baseItems:  state.settings.startingItems,
       speedBoost: 0,
       shield:     0,
@@ -385,53 +454,22 @@ io.on('connection', socket => {
       state.posMap.set(`${p.x},${p.y}`, p.id);
     }
 
-    state.phase     = 'playing';
-    state.timer     = duration;
+    state.phase          = 'countdown';
+    state.countdownTimer = 3;
+    state.timer          = duration;
     spawnSnorlax();
-    snorlaxInterval = setInterval(moveSnorlax, 2000);
+    io.emit('state_update', snapshot());
 
-    ticker = setInterval(() => {
-      // Camping penalty: players within 2 tiles of own base lose items after 5s grace
-      for (const p of Object.values(state.players)) {
-        const dist = Math.abs(p.x - p.baseX) + Math.abs(p.y - p.baseY);
-        if (dist <= 2) {
-          p.campTicks++;
-          if (p.campTicks > 5 && p.campTicks % 3 === 0 && p.baseItems > 0) {
-            p.baseItems--;
-            spawnDroppedItem(p.baseX, p.baseY);
-          }
-        } else {
-          p.campTicks = 0;
-        }
-      }
-
-      state.timer--;
-      if (state.timer <= 0) {
-        state.timer   = 0;
-        state.phase   = 'ended';
-        state.powerUp  = null;
-        state.shieldUp = null;
-        state.snorlax  = null;
-        clearInterval(ticker); ticker = null;
-        if (gameTick)        { clearInterval(gameTick);          gameTick        = null; }
-        if (powerUpTimer)    { clearTimeout(powerUpTimer);      powerUpTimer    = null; }
-        if (shieldUpTimer)   { clearTimeout(shieldUpTimer);     shieldUpTimer   = null; }
-        if (snorlaxInterval) { clearInterval(snorlaxInterval);  snorlaxInterval = null; }
+    // 3-2-1 countdown, then start playing
+    countdownTick = setInterval(() => {
+      state.countdownTimer--;
+      if (state.countdownTimer <= 0) {
+        clearInterval(countdownTick); countdownTick = null;
+        state.phase = 'playing';
+        startGameTimers();
       }
       io.emit('state_update', snapshot());
     }, 1000);
-
-    // Fast game tick: batch-broadcast state changes at 10 Hz instead of per-move
-    gameTick = setInterval(() => {
-      if (state.dirty && state.phase === 'playing') {
-        io.emit('state_update', snapshot());
-        state.dirty = false;
-      }
-    }, 100);
-
-    spawnPowerUp();
-    spawnShieldUp();
-    io.emit('state_update', snapshot());
   });
 
   // MOVE
@@ -442,7 +480,8 @@ io.on('connection', socket => {
 
     const now      = Date.now();
     const boosted  = p.speedBoost > now;
-    const cooldown = boosted ? Math.floor(MOVE_COOLDOWN / 2) : MOVE_COOLDOWN;
+    const baseCd   = p.character === 'pete' ? 125 : MOVE_COOLDOWN;
+    const cooldown = boosted ? Math.floor(baseCd / 2) : baseCd;
     if (now - p.lastMove < cooldown) return;
 
     const delta = DIR_DELTA[dir];
@@ -468,6 +507,7 @@ io.on('connection', socket => {
       state.posMap.delete(oldKey);
       p.x = spawn.x;  p.y = spawn.y;  p.lastMove = now;
       state.posMap.set(`${p.x},${p.y}`, socket.id);
+      emitEvent('bounce', { actor: occupant.name, actorColor: occupant.color, victim: p.name, victimColor: p.color });
       state.dirty = true;
       return;
     }
@@ -478,6 +518,7 @@ io.on('connection', socket => {
       const spawn = findSpawnNear(occupant.baseX, occupant.baseY, occupant.id);
       occupant.x = spawn.x;  occupant.y = spawn.y;
       state.posMap.set(`${occupant.x},${occupant.y}`, occupant.id);
+      emitEvent('bounce', { actor: p.name, actorColor: p.color, victim: occupant.name, victimColor: occupant.color });
       // fall through — mover takes the tile
     } else if (occupant) {
       return;
@@ -489,44 +530,70 @@ io.on('connection', socket => {
     p.x = nx;  p.y = ny;  p.lastMove = now;
     state.posMap.set(nKey, socket.id);
 
-    // Deposit at own base
+    // Deposit at own base (Francis deposits all carried items at once)
     if (p.carrying && nx === p.baseX && ny === p.baseY) {
-      p.carrying = false;
-      p.baseItems++;
+      p.baseItems += p.carrying;
+      emitEvent('deposit', { actor: p.name, actorColor: p.color, count: p.carrying });
+      p.carrying = 0;
     }
 
     // Steal from enemy base
-    if (!p.carrying) {
+    const maxCarry = p.character === 'francis' ? 2 : 1;
+    if (p.carrying < maxCarry) {
       for (const q of Object.values(state.players)) {
         if (q.id !== socket.id && nx === q.baseX && ny === q.baseY && q.baseItems > 0) {
-          q.baseItems--;
-          p.carrying = true;
+          // Nigel's fortified base: first visit cracks, second visit steals
+          if (q.character === 'nigel') {
+            const crack = state.baseCracked[q.id];
+            if (crack && crack.by === socket.id && now - crack.at < 3000) {
+              delete state.baseCracked[q.id];
+              // Fall through to steal
+            } else {
+              state.baseCracked[q.id] = { by: socket.id, at: now };
+              state.dirty = true;
+              break;
+            }
+          }
+          // Chardi's quick hands: steals 2, keeps 1, drops 1
+          if (p.character === 'chardi' && q.baseItems >= 2) {
+            q.baseItems -= 2;
+            p.carrying = 1;
+            spawnDroppedItem(q.baseX, q.baseY);
+          } else {
+            q.baseItems--;
+            p.carrying++;
+          }
+          emitEvent('steal', { actor: p.name, actorColor: p.color, victim: q.name, victimColor: q.color });
           break;
         }
       }
     }
 
     // Pick up dropped item
-    if (!p.carrying) {
+    if (p.carrying < maxCarry) {
       const dropIdx = state.droppedItems.findIndex(d => d.x === nx && d.y === ny);
       if (dropIdx !== -1) {
         state.droppedItems.splice(dropIdx, 1);
-        p.carrying = true;
+        p.carrying++;
       }
     }
 
-    // Pick up speed boost
+    // Pick up speed boost (Scotland gets 50% longer duration)
     if (state.powerUp && nx === state.powerUp.x && ny === state.powerUp.y) {
-      p.speedBoost  = now + BOOST_DURATION;
+      const dur = p.character === 'scotland' ? BOOST_DURATION * 1.5 : BOOST_DURATION;
+      p.speedBoost  = now + dur;
       state.powerUp = null;
       powerUpTimer  = setTimeout(spawnPowerUp, BOOST_RESPAWN);
+      emitEvent('boost', { actor: p.name, actorColor: p.color });
     }
 
-    // Pick up shield
+    // Pick up shield (Scotland gets 50% longer duration)
     if (state.shieldUp && nx === state.shieldUp.x && ny === state.shieldUp.y) {
-      p.shield      = now + BOOST_DURATION;
+      const dur = p.character === 'scotland' ? BOOST_DURATION * 1.5 : BOOST_DURATION;
+      p.shield      = now + dur;
       state.shieldUp = null;
       shieldUpTimer  = setTimeout(spawnShieldUp, BOOST_RESPAWN);
+      emitEvent('shield', { actor: p.name, actorColor: p.color });
     }
 
     state.dirty = true;
@@ -537,6 +604,7 @@ io.on('connection', socket => {
     if (socket.id !== state.hostId || state.phase !== 'ended') return;
     if (ticker)          { clearInterval(ticker);          ticker          = null; }
     if (gameTick)        { clearInterval(gameTick);        gameTick        = null; }
+    if (countdownTick)   { clearInterval(countdownTick);   countdownTick   = null; }
     if (powerUpTimer)    { clearTimeout(powerUpTimer);     powerUpTimer    = null; }
     if (shieldUpTimer)   { clearTimeout(shieldUpTimer);    shieldUpTimer   = null; }
     if (snorlaxInterval) { clearInterval(snorlaxInterval); snorlaxInterval = null; }
@@ -547,7 +615,7 @@ io.on('connection', socket => {
     assignPositions(tier);
 
     for (const p of Object.values(state.players)) {
-      p.carrying   = false;
+      p.carrying   = 0;
       p.baseItems  = state.settings.startingItems;
       p.speedBoost = 0;
       p.shield     = 0;
@@ -567,6 +635,7 @@ io.on('connection', socket => {
     state.droppedItems  = [];
     state.obstacles     = [];
     state.obstacleSet   = new Set();
+    state.baseCracked   = {};
     state.dirty         = false;
     state.snorlax   = null;
     state.phase     = 'lobby';
@@ -592,6 +661,7 @@ io.on('connection', socket => {
     if (Object.keys(state.players).length === 0) {
       if (ticker)          { clearInterval(ticker);          ticker          = null; }
       if (gameTick)        { clearInterval(gameTick);        gameTick        = null; }
+      if (countdownTick)   { clearInterval(countdownTick);   countdownTick   = null; }
       if (powerUpTimer)    { clearTimeout(powerUpTimer);     powerUpTimer    = null; }
       if (shieldUpTimer)   { clearTimeout(shieldUpTimer);    shieldUpTimer   = null; }
       if (snorlaxInterval) { clearInterval(snorlaxInterval); snorlaxInterval = null; }

@@ -99,14 +99,16 @@ socket.on('state_update', s => {
   }
 
   playSounds(prevState, s);
+  triggerParticles(prevState, s);
 
-  if      (s.phase === 'lobby')   { show('lobby'); renderLobby(); }
-  else if (s.phase === 'playing') { show('game');  renderHUD(); $('hud').style.maxWidth = SIZE + 'px'; }
-  else if (s.phase === 'ended')   { show('end');   renderEnd(); }
+  if      (s.phase === 'lobby')     { show('lobby'); renderLobby(); }
+  else if (s.phase === 'countdown') { show('game');  renderHUD(); $('hud').style.maxWidth = SIZE + 'px'; }
+  else if (s.phase === 'playing')   { show('game');  renderHUD(); $('hud').style.maxWidth = SIZE + 'px'; }
+  else if (s.phase === 'ended')     { show('end');   renderEnd(); }
 });
 
 // ── Input — tap-to-move, client-side rate limit mirrors server ────────────────
-const COOLDOWN = 150;
+const BASE_COOLDOWN = 150;
 let lastSent   = 0;
 
 const KEYS = {
@@ -120,10 +122,11 @@ document.addEventListener('keydown', e => {
   if (!dir || state?.phase !== 'playing') return;
   e.preventDefault();
   const now = Date.now();
-  // Mirror server: halve cooldown when speed-boosted
+  // Mirror server: Pete has 125ms base cooldown; halve when speed-boosted
   const me      = state.players[myId];
+  const baseCd  = me?.character === 'pete' ? 125 : BASE_COOLDOWN;
   const boosted = me?.speedBoostExpiry > now;
-  const limit   = boosted ? Math.floor(COOLDOWN / 2) : COOLDOWN;
+  const limit   = boosted ? Math.floor(baseCd / 2) : baseCd;
   if (now - lastSent < limit) return;
   lastSent = now;
   socket.emit('move', dir);
@@ -131,7 +134,7 @@ document.addEventListener('keydown', e => {
 
 // ── RAF game loop — handles smooth carry bob + power-up pulse ─────────────────
 ;(function loop() {
-  if (state?.phase === 'playing') renderGame();
+  if (state?.phase === 'playing' || state?.phase === 'countdown') renderGame();
   requestAnimationFrame(loop);
 })();
 
@@ -368,6 +371,9 @@ function renderGame() {
     const boosted  = p.speedBoostExpiry > now;
     const shielded = p.shieldExpiry > now;
 
+    // Alicia phantom: invisible to others when not carrying
+    if (p.phantom && !isMe) continue;
+
     // Carry bob: gentle sine offset on y
     const bob = p.carrying ? Math.sin(now / 180) * 3 : 0;
     const cx  = p.x * TILE + TILE / 2;
@@ -394,14 +400,20 @@ function renderGame() {
       ctx.drawImage(charImg, cx - s / 2, cy - s / 2, s, s);
     }
 
-    // Carrying indicator — small white dot top-right
+    // Carrying indicator — dot(s) top-right; Francis can carry 2
     if (p.carrying) {
-      ctx.beginPath();
-      ctx.arc(cx + r * 0.62, cy - r * 0.62, Math.max(TILE * 0.14, 2.5), 0, Math.PI * 2);
+      const dotR = Math.max(TILE * 0.14, 2.5);
       ctx.fillStyle   = '#fff';
       ctx.shadowColor = '#fff';
       ctx.shadowBlur  = 6;
+      ctx.beginPath();
+      ctx.arc(cx + r * 0.62, cy - r * 0.62, dotR, 0, Math.PI * 2);
       ctx.fill();
+      if (p.carrying >= 2) {
+        ctx.beginPath();
+        ctx.arc(cx + r * 0.62 - dotR * 2.5, cy - r * 0.62, dotR, 0, Math.PI * 2);
+        ctx.fill();
+      }
       ctx.shadowBlur  = 0;
     }
 
@@ -411,6 +423,31 @@ function renderGame() {
     ctx.textAlign    = 'center';
     ctx.textBaseline = 'bottom';
     ctx.fillText(p.name, cx, cy - r - 3 + bob);
+  }
+
+  // ── Particles ──
+  updateAndRenderParticles();
+
+  // ── Kill feed ──
+  renderEventLog();
+
+  // ── Countdown overlay ──
+  if (state.phase === 'countdown' && state.countdownTimer > 0) {
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(0, 0, SIZE, SIZE);
+
+    const num   = state.countdownTimer;
+    const pulse = 1 + 0.15 * Math.sin(now / 120);
+    const fontSize = Math.round(SIZE * 0.25 * pulse);
+
+    ctx.font         = `bold ${fontSize}px sans-serif`;
+    ctx.textAlign    = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor  = '#ffd700';
+    ctx.shadowBlur   = 30;
+    ctx.fillStyle    = '#ffffff';
+    ctx.fillText(num, SIZE / 2, SIZE / 2);
+    ctx.shadowBlur   = 0;
   }
 }
 
@@ -486,6 +523,15 @@ function playBounce() {
   tone(150, 0.15, 'square', 0.15, 0.1);
 }
 
+function playCountdown() {
+  tone(660, 0.15, 'sine', 0.25);
+}
+
+function playGo() {
+  tone(880, 0.12, 'sine', 0.3);
+  tone(1100, 0.15, 'sine', 0.3, 0.1);
+}
+
 function playGameEnd() {
   [900, 700, 500, 350].forEach((f, i) => tone(f, 0.22, 'sine', 0.3, i * 0.17));
 }
@@ -518,9 +564,125 @@ function playSounds(prev, curr) {
   if (curr.phase === 'playing' && curr.timer <= 30 && curr.timer > 0 && curr.timer !== prev.timer)
     playTick();
 
+  // Countdown beeps
+  if (curr.phase === 'countdown' && prev.countdownTimer !== curr.countdownTimer && curr.countdownTimer > 0)
+    playCountdown();
+  if (prev.phase === 'countdown' && curr.phase === 'playing')
+    playGo();
+
   // Game over fanfare
   if (prev.phase !== 'ended' && curr.phase === 'ended')
     playGameEnd();
+}
+
+// ── Particle system ──────────────────────────────────────────────────────────
+const particles = [];
+let lastFrameTime = Date.now();
+
+function spawnParticles(gx, gy, color, count) {
+  const cx = gx * TILE + TILE / 2;
+  const cy = gy * TILE + TILE / 2;
+  for (let i = 0; i < count; i++) {
+    const angle = (Math.PI * 2 * i) / count + Math.random() * 0.4;
+    const speed = 40 + Math.random() * 60;
+    particles.push({
+      x: cx, y: cy,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life: 1.0,
+      decay: 1.2 + Math.random() * 0.8,
+      size: TILE * 0.08 + Math.random() * TILE * 0.08,
+      color,
+    });
+  }
+}
+
+function updateAndRenderParticles() {
+  const now = Date.now();
+  const dt  = (now - lastFrameTime) / 1000;
+  lastFrameTime = now;
+
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const pt = particles[i];
+    pt.x    += pt.vx * dt;
+    pt.y    += pt.vy * dt;
+    pt.life -= pt.decay * dt;
+    if (pt.life <= 0) { particles.splice(i, 1); continue; }
+    ctx.globalAlpha = pt.life;
+    ctx.fillStyle   = pt.color;
+    ctx.beginPath();
+    ctx.arc(pt.x, pt.y, pt.size, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function triggerParticles(prev, curr) {
+  if (!prev || !curr) return;
+  for (const [id, p] of Object.entries(curr.players)) {
+    const pp = prev.players[id];
+    if (!pp) continue;
+    // Steal: started carrying
+    if (!pp.carrying && p.carrying) {
+      // Find which base lost items
+      for (const q of Object.values(curr.players)) {
+        const prevQ = prev.players[q.id];
+        if (prevQ && q.baseItems < prevQ.baseItems) {
+          spawnParticles(q.baseX, q.baseY, '#ff4444', 12);
+          break;
+        }
+      }
+    }
+    // Deposit: stopped carrying, gained base items
+    if (pp.carrying && !p.carrying && p.baseItems > pp.baseItems) {
+      spawnParticles(p.baseX, p.baseY, '#ffd700', 15);
+    }
+  }
+}
+
+// ── Kill feed ─────────────────────────────────────────────────────────────────
+const eventLog = [];
+const EVENT_MAX   = 5;
+const EVENT_LIFE  = 6000; // ms
+
+socket.on('game_event', evt => {
+  let text = '';
+  switch (evt.type) {
+    case 'steal':   text = `${evt.actor} stole from ${evt.victim}`; break;
+    case 'deposit': text = `${evt.actor} deposited${evt.count > 1 ? ' x' + evt.count : ''}`; break;
+    case 'boost':   text = `${evt.actor} picked up ⚡`; break;
+    case 'shield':  text = `${evt.actor} picked up 🛡️`; break;
+    case 'bounce':  text = `${evt.actor} bounced ${evt.victim}`; break;
+    default: return;
+  }
+  eventLog.push({ text, color: evt.actorColor, time: Date.now() });
+  if (eventLog.length > EVENT_MAX) eventLog.shift();
+});
+
+function renderEventLog() {
+  const now = Date.now();
+  const fontSize = Math.max(Math.round(TILE * 0.45), 10);
+  ctx.font         = `${fontSize}px sans-serif`;
+  ctx.textAlign    = 'left';
+  ctx.textBaseline = 'bottom';
+
+  let y = SIZE - 8;
+  for (let i = eventLog.length - 1; i >= 0; i--) {
+    const e   = eventLog[i];
+    const age = now - e.time;
+    if (age > EVENT_LIFE) { eventLog.splice(i, 1); continue; }
+    const alpha = age < 4000 ? 1 : 1 - (age - 4000) / 2000;
+
+    // Background pill
+    const tw = ctx.measureText(e.text).width;
+    ctx.fillStyle = `rgba(0,0,0,${0.5 * alpha})`;
+    ctx.fillRect(6, y - fontSize - 2, tw + 10, fontSize + 6);
+
+    // Text
+    ctx.fillStyle = e.color ? e.color.replace(')', `,${alpha})`) .replace('hsl(', 'hsla(') : `rgba(255,255,255,${alpha})`;
+    ctx.fillText(e.text, 11, y);
+    y -= fontSize + 8;
+  }
 }
 
 // ── Util ──────────────────────────────────────────────────────────────────────

@@ -106,11 +106,12 @@ socket.on('state_update', s => {
 
   if (s.phase === 'lobby') {
     isSpectating = false;  // Can join next round
+    stopMusic();
     show('lobby'); renderLobby();
   }
-  else if (s.phase === 'countdown') { show('game');  renderHUD(); $('hud').style.maxWidth = SIZE + 'px'; }
-  else if (s.phase === 'playing')   { show('game');  renderHUD(); $('hud').style.maxWidth = SIZE + 'px'; }
-  else if (s.phase === 'ended')     { show('end');   renderEnd(); }
+  else if (s.phase === 'countdown') { playMusic(); show('game');  renderHUD(); $('hud').style.maxWidth = SIZE + 'px'; }
+  else if (s.phase === 'playing')   { playMusic(); show('game');  renderHUD(); $('hud').style.maxWidth = SIZE + 'px'; }
+  else if (s.phase === 'ended')     { stopMusic(); show('end');   renderEnd(); }
 });
 
 // ── Input — tap-to-move, client-side rate limit mirrors server ────────────────
@@ -592,6 +593,103 @@ function playSounds(prev, curr) {
   // Game over fanfare
   if (prev.phase !== 'ended' && curr.phase === 'ended')
     playGameEnd();
+}
+
+// ── 8-bit backing track ──────────────────────────────────────────────────────
+let musicPlaying  = false;
+let musicMuted    = false;
+let musicGain     = null;
+let musicTimeout  = null;
+
+// Pentatonic melody in A minor — loopable, catchy, 8-bit feel
+const BPM       = 140;
+const BEAT      = 60 / BPM;
+const NOTE_FREQS = {
+  C4:261.63, D4:293.66, E4:329.63, G4:392.00, A4:440.00,
+  C5:523.25, D5:587.33, E5:659.25, G5:783.99, A5:880.00,
+  A3:220.00, C4b:261.63, E3:164.81, G3:196.00, C3:130.81,
+};
+
+const MELODY = [
+  ['A4',1],['C5',0.5],['D5',0.5],['E5',1],['D5',0.5],['C5',0.5],
+  ['A4',1],['G4',1],['E4',1],['G4',0.5],['A4',0.5],
+  ['C5',1],['A4',0.5],['G4',0.5],['E4',1],['D4',1],
+  ['E4',1],['G4',0.5],['A4',0.5],['C5',1],['A4',1],
+];
+
+const BASS = [
+  ['A3',2],['C4b',2],['G3',2],['E3',2],
+  ['A3',2],['C4b',2],['G3',2],['E3',1],['A3',1],
+];
+
+function playMusic() {
+  if (musicPlaying) return;
+  musicPlaying = true;
+  const ac = getAC();
+
+  if (!musicGain) {
+    musicGain = ac.createGain();
+    musicGain.connect(ac.destination);
+    musicGain.gain.value = musicMuted ? 0 : 0.08;
+  }
+
+  function scheduleLoop() {
+    const startTime = ac.currentTime + 0.05;
+
+    // Melody
+    let t = startTime;
+    for (const [note, beats] of MELODY) {
+      const dur = beats * BEAT;
+      const osc = ac.createOscillator();
+      const g   = ac.createGain();
+      osc.connect(g);
+      g.connect(musicGain);
+      osc.type = 'square';
+      osc.frequency.value = NOTE_FREQS[note];
+      g.gain.setValueAtTime(0.5, t);
+      g.gain.exponentialRampToValueAtTime(0.01, t + dur * 0.9);
+      osc.start(t);
+      osc.stop(t + dur);
+      t += dur;
+    }
+    const loopDur = t - startTime;
+
+    // Bass
+    let bt = startTime;
+    for (const [note, beats] of BASS) {
+      const dur = beats * BEAT;
+      const osc = ac.createOscillator();
+      const g   = ac.createGain();
+      osc.connect(g);
+      g.connect(musicGain);
+      osc.type = 'triangle';
+      osc.frequency.value = NOTE_FREQS[note];
+      g.gain.setValueAtTime(0.6, bt);
+      g.gain.exponentialRampToValueAtTime(0.01, bt + dur * 0.85);
+      osc.start(bt);
+      osc.stop(bt + dur);
+      bt += dur;
+    }
+
+    // Schedule next loop
+    musicTimeout = setTimeout(() => {
+      if (musicPlaying) scheduleLoop();
+    }, (loopDur - 0.1) * 1000);
+  }
+
+  scheduleLoop();
+}
+
+function stopMusic() {
+  musicPlaying = false;
+  if (musicTimeout) { clearTimeout(musicTimeout); musicTimeout = null; }
+}
+
+function toggleMusic() {
+  musicMuted = !musicMuted;
+  if (musicGain) musicGain.gain.value = musicMuted ? 0 : 0.08;
+  const btn = $('music-btn');
+  if (btn) btn.textContent = musicMuted ? '🔇' : '🔊';
 }
 
 // ── Particle system ──────────────────────────────────────────────────────────

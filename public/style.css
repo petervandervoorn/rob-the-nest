@@ -308,3 +308,16 @@ input[type="number"]:focus { outline: none; border-color: #e74c3c; }
   font-size: 0.75em;
   margin-left: 0.5rem;
 }
+
+/* ── Music toggle ───────────────────────────────────────────────────────── */
+#music-btn {
+  background: #1a1a2e;
+  border: 1px solid #2e2e4a;
+  font-size: 1.1rem;
+  padding: 4px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  margin-left: auto;
+  min-width: 36px;
+}
+#music-btn:hover { background: #252545; }

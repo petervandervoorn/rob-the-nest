@@ -98,6 +98,14 @@
         <div id="feed-list"></div>
       </div>
     </div>
+    <div id="dpad">
+      <button class="dpad-btn" data-dir="up">▲</button>
+      <div class="dpad-mid">
+        <button class="dpad-btn" data-dir="left">◀</button>
+        <button class="dpad-btn" data-dir="right">▶</button>
+      </div>
+      <button class="dpad-btn" data-dir="down">▼</button>
+    </div>
   </div>
 
   <!-- ── END ───────────────────────────────────────────────────────────── -->
@@ -106,15 +114,6 @@
     <div id="final"></div>
     <button id="restart-btn" style="display:none">Play Again</button>
     <p id="end-wait" style="display:none">Waiting for host to restart…</p>
-  </div>
-
-  <div id="dpad">
-    <button class="dpad-btn" data-dir="up">▲</button>
-    <div class="dpad-mid">
-      <button class="dpad-btn" data-dir="left">◀</button>
-      <button class="dpad-btn" data-dir="right">▶</button>
-    </div>
-    <button class="dpad-btn" data-dir="down">▼</button>
   </div>
 
   <script src="/socket.io/socket.io.js"></script>

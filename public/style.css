@@ -448,7 +448,7 @@ input[type="number"]:focus { outline: none; border-color: #e74c3c; }
 }
 .dpad-mid {
   display: flex;
-  gap: 4px;
+  gap: 52px;
 }
 .dpad-btn {
   width: 56px;

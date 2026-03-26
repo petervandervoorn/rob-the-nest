@@ -435,3 +435,62 @@ input[type="number"]:focus { outline: none; border-color: #e74c3c; }
 }
 #find-me-btn { margin-left: auto; }
 #find-me-btn:hover, #find-base-btn:hover, #music-btn:hover { background: #252545; }
+
+/* ── D-pad (hidden on desktop) ───────────────────────────────────────────── */
+#dpad {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 0;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.dpad-mid {
+  display: flex;
+  gap: 4px;
+}
+.dpad-btn {
+  width: 56px;
+  height: 56px;
+  font-size: 1.4rem;
+  border-radius: 12px;
+  background: #1a1a2e;
+  border: 2px solid #2e2e4a;
+  color: #ccc;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+.dpad-btn:active { background: #e74c3c; color: #fff; border-color: #e74c3c; }
+
+/* ── Mobile ─────────────────────────────────────────────────────────────── */
+@media (max-width: 767px) {
+  body { min-height: auto; align-items: flex-start; }
+  .screen { max-width: 100vw; padding: 1rem 0.5rem; }
+  #game { padding: 0; gap: 0; max-width: 100vw; }
+  #game-area { flex-direction: column; }
+  #leaderboard, #feed { display: none; }
+  #canvas {
+    width: 100vw !important;
+    height: 100vw !important;
+    border-radius: 0;
+    border: none;
+    touch-action: none;
+  }
+  #hud {
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    padding: 6px 8px;
+    font-size: 0.75rem;
+    max-width: 100vw !important;
+  }
+  #timer { font-size: 1.2rem; min-width: auto; }
+  #char-picker { max-width: 100%; }
+  .char-opt img { width: 36px; height: 36px; }
+  .char-opt { padding: 6px 10px; }
+  #dpad { display: flex; }
+}

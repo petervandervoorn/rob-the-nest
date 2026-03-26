@@ -10,6 +10,14 @@ let prevState    = null;
 let isSpectating = false;
 let gameStartedAt = 0;  // timestamp when playing phase began
 
+// ── Mobile detection & camera ────────────────────────────────────────────────
+const MOBILE_BP = 768;
+let isMobile = window.innerWidth < MOBILE_BP;
+window.addEventListener('resize', () => { isMobile = window.innerWidth < MOBILE_BP; resizeCanvas(); });
+
+const MOBILE_VIEW_TILES = 13;
+const camera = { zoom: 1, offX: 0, offY: 0, canvasPx: 0 };
+
 // ── DOM refs ─────────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
 
@@ -110,19 +118,29 @@ socket.on('err', msg => { errMsg.textContent = msg; });
 
 socket.on('spectating', () => { isSpectating = true; });
 
+// Browsers block autoplay until user interaction — retry music on first click/key
+let userHasInteracted = false;
+function onFirstInteraction() {
+  if (userHasInteracted) return;
+  userHasInteracted = true;
+  if (currentPhase) switchMusic(currentPhase);
+  document.removeEventListener('click', onFirstInteraction);
+  document.removeEventListener('keydown', onFirstInteraction);
+}
+document.addEventListener('click', onFirstInteraction);
+document.addEventListener('keydown', onFirstInteraction);
+
 socket.on('state_update', s => {
   prevState = state;
   state     = s;
 
   // Resize canvas if tier changed
   if (s.gridSize && s.tileSize) {
+    const oldSize = SIZE;
     GRID = s.gridSize;
     TILE = s.tileSize;
     SIZE = GRID * TILE;
-    if (canvas.width !== SIZE) {
-      canvas.width  = SIZE;
-      canvas.height = SIZE;
-    }
+    if (SIZE !== oldSize) resizeCanvas();
   }
 
   playSounds(prevState, s);
@@ -162,6 +180,71 @@ document.addEventListener('keydown', e => {
   if (now - lastSent < limit) return;
   lastSent = now;
   socket.emit('move', dir);
+});
+
+// ── Touch controls (mobile) ─────────────────────────────────────────────────
+let touchStartX = 0, touchStartY = 0, touchDir = null, touchInterval = null;
+
+function emitMove(dir) {
+  if (state?.phase !== 'playing' || !myId || !state.players[myId]) return;
+  const now = Date.now();
+  const me  = state.players[myId];
+  const baseCd  = me?.character === 'pete' ? 125 : BASE_COOLDOWN;
+  const boosted = me?.speedBoostExpiry > now;
+  const limit   = boosted ? Math.floor(baseCd / 2) : baseCd;
+  if (now - lastSent < limit) return;
+  lastSent = now;
+  socket.emit('move', dir);
+}
+
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  const t = e.touches[0];
+  touchStartX = t.clientX;
+  touchStartY = t.clientY;
+  touchDir = null;
+}, { passive: false });
+
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  const t = e.touches[0];
+  const dx = t.clientX - touchStartX;
+  const dy = t.clientY - touchStartY;
+  const threshold = 15;
+  if (Math.abs(dx) < threshold && Math.abs(dy) < threshold) return;
+
+  const dir = Math.abs(dx) > Math.abs(dy)
+    ? (dx > 0 ? 'right' : 'left')
+    : (dy > 0 ? 'down' : 'up');
+
+  if (dir !== touchDir) {
+    touchDir = dir;
+    emitMove(dir);
+    if (touchInterval) clearInterval(touchInterval);
+    touchInterval = setInterval(() => emitMove(touchDir), 120);
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchend', () => {
+  touchDir = null;
+  if (touchInterval) { clearInterval(touchInterval); touchInterval = null; }
+});
+
+// D-pad buttons
+document.querySelectorAll('.dpad-btn').forEach(btn => {
+  const dir = btn.dataset.dir;
+  let holdInterval = null;
+  btn.addEventListener('touchstart', e => {
+    e.preventDefault();
+    emitMove(dir);
+    holdInterval = setInterval(() => emitMove(dir), 120);
+  }, { passive: false });
+  btn.addEventListener('touchend', () => {
+    if (holdInterval) { clearInterval(holdInterval); holdInterval = null; }
+  });
+  btn.addEventListener('touchcancel', () => {
+    if (holdInterval) { clearInterval(holdInterval); holdInterval = null; }
+  });
 });
 
 // ── RAF game loop — handles smooth carry bob + power-up pulse ─────────────────
@@ -368,13 +451,64 @@ function getVisualPos(p) {
   return v;
 }
 
+// ── Canvas resize & camera ───────────────────────────────────────────────────
+function resizeCanvas() {
+  if (isMobile) {
+    const px = Math.min(window.innerWidth, window.innerHeight);
+    const dpr = window.devicePixelRatio || 1;
+    camera.canvasPx = Math.round(px * dpr);
+    canvas.width  = camera.canvasPx;
+    canvas.height = camera.canvasPx;
+    canvas.style.width  = px + 'px';
+    canvas.style.height = px + 'px';
+    camera.zoom = camera.canvasPx / (MOBILE_VIEW_TILES * TILE);
+  } else {
+    canvas.width  = SIZE;
+    canvas.height = SIZE;
+    canvas.style.width  = '';
+    canvas.style.height = '';
+    camera.zoom = 1;
+    camera.offX = 0;
+    camera.offY = 0;
+  }
+}
+
+function updateCamera() {
+  if (!isMobile || !myId || !state?.players[myId]) return;
+  const me = state.players[myId];
+  const vp = visualPos[myId] || me;
+  const viewPx   = MOBILE_VIEW_TILES * TILE;
+  const halfView = viewPx / 2;
+
+  let cx = vp.x * TILE + TILE / 2 - halfView;
+  let cy = vp.y * TILE + TILE / 2 - halfView;
+
+  // Clamp to grid edges
+  cx = Math.max(0, Math.min(cx, SIZE - viewPx));
+  cy = Math.max(0, Math.min(cy, SIZE - viewPx));
+
+  // Smooth camera lerp
+  camera.offX += (cx - camera.offX) * 0.15;
+  camera.offY += (cy - camera.offY) * 0.15;
+}
+
 // ── Canvas render ─────────────────────────────────────────────────────────────
 function renderGame() {
   if (!state) return;
   const now     = Date.now();
   const players = Object.values(state.players);
 
-  ctx.clearRect(0, 0, SIZE, SIZE);
+  updateCamera();
+
+  // Clear in screen space
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Apply camera transform
+  ctx.save();
+  if (isMobile) {
+    ctx.scale(camera.zoom, camera.zoom);
+    ctx.translate(-camera.offX, -camera.offY);
+  }
 
   // Background
   ctx.fillStyle = '#12121f';
@@ -616,14 +750,18 @@ function renderGame() {
   // ── Particles ──
   updateAndRenderParticles();
 
-  // ── Countdown overlay ──
+  // Restore camera transform before drawing screen-space overlays
+  ctx.restore();
+
+  // ── Countdown overlay (screen space) ──
   if (state.phase === 'countdown' && state.countdownTimer > 0) {
+    const cw = canvas.width, ch = canvas.height;
     ctx.fillStyle = 'rgba(0,0,0,0.55)';
-    ctx.fillRect(0, 0, SIZE, SIZE);
+    ctx.fillRect(0, 0, cw, ch);
 
     const num   = state.countdownTimer;
     const pulse = 1 + 0.15 * Math.sin(now / 120);
-    const fontSize = Math.round(SIZE * 0.25 * pulse);
+    const fontSize = Math.round(Math.min(cw, ch) * 0.25 * pulse);
 
     ctx.font         = `bold ${fontSize}px sans-serif`;
     ctx.textAlign    = 'center';
@@ -631,7 +769,7 @@ function renderGame() {
     ctx.shadowColor  = '#ffd700';
     ctx.shadowBlur   = 30;
     ctx.fillStyle    = '#ffffff';
-    ctx.fillText(num, SIZE / 2, SIZE / 2);
+    ctx.fillText(num, cw / 2, ch / 2);
     ctx.shadowBlur   = 0;
   }
 }

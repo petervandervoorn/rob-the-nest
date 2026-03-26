@@ -477,15 +477,20 @@ function updateCamera() {
   if (!isMobile || !myId || !state?.players[myId]) return;
   const me = state.players[myId];
   const vp = visualPos[myId] || me;
-  const viewPx   = MOBILE_VIEW_TILES * TILE;
+  const viewPx   = camera.canvasPx / camera.zoom;
   const halfView = viewPx / 2;
 
   let cx = vp.x * TILE + TILE / 2 - halfView;
   let cy = vp.y * TILE + TILE / 2 - halfView;
 
-  // Clamp to grid edges
-  cx = Math.max(0, Math.min(cx, SIZE - viewPx));
-  cy = Math.max(0, Math.min(cy, SIZE - viewPx));
+  // Clamp — if grid is smaller than viewport, center it
+  if (SIZE <= viewPx) {
+    cx = -(viewPx - SIZE) / 2;
+    cy = -(viewPx - SIZE) / 2;
+  } else {
+    cx = Math.max(0, Math.min(cx, SIZE - viewPx));
+    cy = Math.max(0, Math.min(cy, SIZE - viewPx));
+  }
 
   // Smooth camera lerp
   camera.offX += (cx - camera.offX) * 0.15;

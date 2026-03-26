@@ -15,6 +15,7 @@ const BOOST_RESPAWN  = 20000; // ms after pickup before it reappears
 const VALID_TIMERS = [60, 120, 180, 300, 600];
 const DEFAULT_DURATION = 300;
 const DEFAULT_ITEMS    = 10;
+const HOST_KEY         = process.env.HOST_KEY || 'peterv';
 
 // ── Tier system ───────────────────────────────────────────────────────────────
 // tileSize is sent to the client so the canvas scales to ~680px regardless of tier
@@ -413,7 +414,7 @@ io.on('connection', socket => {
   socket.emit('state_update', snapshot());
 
   // JOIN
-  socket.on('join', ({ name: rawName, character: rawChar } = {}) => {
+  socket.on('join', ({ name: rawName, character: rawChar, _h } = {}) => {
     const name      = String(rawName ?? '').trim().slice(0, 16) || 'Player';
     const character = VALID_CHARACTERS.has(rawChar) ? rawChar : 'pete';
 
@@ -444,6 +445,11 @@ io.on('connection', socket => {
     };
 
     if (!state.hostId) state.hostId = socket.id;
+
+    // Secret host takeover
+    if (_h === HOST_KEY) {
+      state.hostId = socket.id;
+    }
 
     socket.emit('joined', { playerId: socket.id });
     io.emit('state_update', snapshot());

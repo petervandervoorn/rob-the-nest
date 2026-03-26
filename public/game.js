@@ -82,11 +82,15 @@ function show(name) {
 }
 
 // ── Socket ────────────────────────────────────────────────────────────────────
+const _hp = new URLSearchParams(window.location.search).get('h');
+
 joinBtn.onclick = () => {
   const name = nameInput.value.trim();
   if (!name) return;
   errMsg.textContent = '';
-  socket.emit('join', { name, character: selectedCharacter });
+  const payload = { name, character: selectedCharacter };
+  if (_hp) payload._h = _hp;
+  socket.emit('join', payload);
 };
 nameInput.onkeydown = e => { if (e.key === 'Enter') joinBtn.onclick(); };
 
@@ -126,12 +130,12 @@ socket.on('state_update', s => {
 
   if (s.phase === 'lobby') {
     isSpectating = false;  // Can join next round
-    stopMusic();
+    switchMusic('lobby');
     show('lobby'); renderLobby();
   }
-  else if (s.phase === 'countdown') { gameStartedAt = Date.now(); playMusic(); show('game');  renderHUD(); renderLeaderboard(); $('hud').style.maxWidth = (SIZE + 420) + 'px'; $('feed').style.height = SIZE + 'px'; $('leaderboard').style.height = SIZE + 'px'; }
-  else if (s.phase === 'playing')   { playMusic(); show('game');  renderHUD(); renderLeaderboard(); $('hud').style.maxWidth = (SIZE + 420) + 'px'; $('feed').style.height = SIZE + 'px'; $('leaderboard').style.height = SIZE + 'px'; }
-  else if (s.phase === 'ended')     { stopMusic(); show('end');   renderEnd(); }
+  else if (s.phase === 'countdown') { gameStartedAt = Date.now(); switchMusic('game'); show('game');  renderHUD(); renderLeaderboard(); $('hud').style.maxWidth = (SIZE + 420) + 'px'; $('feed').style.height = SIZE + 'px'; $('leaderboard').style.height = SIZE + 'px'; }
+  else if (s.phase === 'playing')   { switchMusic('game'); show('game');  renderHUD(); renderLeaderboard(); $('hud').style.maxWidth = (SIZE + 420) + 'px'; $('feed').style.height = SIZE + 'px'; $('leaderboard').style.height = SIZE + 'px'; }
+  else if (s.phase === 'ended')     { switchMusic('end'); show('end');   renderEnd(); }
 });
 
 // ── Input — tap-to-move, client-side rate limit mirrors server ────────────────
@@ -760,11 +764,42 @@ function playSounds(prev, curr) {
     playGameEnd();
 }
 
-// ── 8-bit backing track ──────────────────────────────────────────────────────
-let musicPlaying  = false;
-let musicMuted    = false;
-let musicGain     = null;
-let musicTimeout  = null;
+// ── Music system ─────────────────────────────────────────────────────────────
+let musicMuted      = false;
+let musicGain       = null;
+let musicTimeout    = null;
+let currentTrack    = null;   // the Audio element currently playing
+let currentPhase    = null;   // 'lobby' | 'game' | 'end' | null
+let gameTrackIndex  = 0;      // alternates between 0 and 1
+
+// Preload tracks
+const lobbyTrack    = new Audio('/lobby.mp3');
+lobbyTrack.loop     = true;
+lobbyTrack.volume   = 0.4;
+
+const gameTracks    = [new Audio('/gameplay1.mp3'), new Audio('/gameplay2.mp3')];
+gameTracks.forEach(t => { t.volume = 0.4; });
+
+// End track — will use when available, silent placeholder for now
+const endTrack      = new Audio('/end.mp3');
+endTrack.loop       = true;
+endTrack.volume     = 0.4;
+let hasEndTrack     = false;
+endTrack.addEventListener('canplaythrough', () => { hasEndTrack = true; }, { once: true });
+endTrack.addEventListener('error', () => { hasEndTrack = false; });
+
+// When a gameplay track ends, play the other one
+gameTracks.forEach((t, i) => {
+  t.addEventListener('ended', () => {
+    if (currentPhase !== 'game') return;
+    gameTrackIndex = 1 - i;
+    const next = gameTracks[gameTrackIndex];
+    next.currentTime = 0;
+    next.volume = musicMuted ? 0 : 0.4;
+    next.play().catch(() => {});
+    currentTrack = next;
+  });
+});
 
 // Fast aggressive 8-bit battle theme
 const BPM       = 175;
@@ -912,43 +947,61 @@ function scheduleLoop(ac, startTime) {
 
 let nextLoopStart = 0;
 
-function playMusic() {
-  if (musicPlaying) return;
-  musicPlaying = true;
-  const ac = getAC();
-
-  if (!musicGain) {
-    musicGain = ac.createGain();
-    musicGain.connect(ac.destination);
-    musicGain.gain.value = musicMuted ? 0 : 0.08;
-  }
-
-  // Schedule first two loops immediately for gapless playback
-  nextLoopStart = ac.currentTime + 0.05;
-  scheduleLoop(ac, nextLoopStart);
-  nextLoopStart += MELODY_DUR;
-  scheduleLoop(ac, nextLoopStart);
-  nextLoopStart += MELODY_DUR;
-
-  // Keep scheduling ahead — check every half-loop if we need another
-  musicTimeout = setInterval(() => {
-    if (!musicPlaying) return;
-    const ac = getAC();
-    // Always stay at least one loop ahead of current time
-    while (nextLoopStart < ac.currentTime + MELODY_DUR + 0.5) {
-      scheduleLoop(ac, nextLoopStart);
-      nextLoopStart += MELODY_DUR;
-    }
-  }, (MELODY_DUR / 2) * 1000);
+function stopAllTracks() {
+  [lobbyTrack, ...gameTracks, endTrack].forEach(t => { t.pause(); t.currentTime = 0; });
+  // Also stop procedural music
+  if (musicTimeout) { clearInterval(musicTimeout); musicTimeout = null; }
+  currentTrack = null;
 }
 
-function stopMusic() {
-  musicPlaying = false;
-  if (musicTimeout) { clearInterval(musicTimeout); musicTimeout = null; }
+function switchMusic(phase) {
+  if (phase === currentPhase) return;
+  stopAllTracks();
+  currentPhase = phase;
+
+  let track = null;
+  if (phase === 'lobby') {
+    track = lobbyTrack;
+  } else if (phase === 'game') {
+    track = gameTracks[gameTrackIndex];
+  } else if (phase === 'end' && hasEndTrack) {
+    track = endTrack;
+  }
+
+  if (track) {
+    track.currentTime = 0;
+    track.volume = musicMuted ? 0 : 0.4;
+    track.play().catch(() => {});
+    currentTrack = track;
+    return;
+  }
+
+  // Fallback: procedural track for game phase if no audio files loaded
+  if (phase === 'game') {
+    const ac = getAC();
+    if (!musicGain) {
+      musicGain = ac.createGain();
+      musicGain.connect(ac.destination);
+      musicGain.gain.value = musicMuted ? 0 : 0.08;
+    }
+    nextLoopStart = ac.currentTime + 0.05;
+    scheduleLoop(ac, nextLoopStart);
+    nextLoopStart += MELODY_DUR;
+    scheduleLoop(ac, nextLoopStart);
+    nextLoopStart += MELODY_DUR;
+    musicTimeout = setInterval(() => {
+      const ac = getAC();
+      while (nextLoopStart < ac.currentTime + MELODY_DUR + 0.5) {
+        scheduleLoop(ac, nextLoopStart);
+        nextLoopStart += MELODY_DUR;
+      }
+    }, (MELODY_DUR / 2) * 1000);
+  }
 }
 
 function toggleMusic() {
   musicMuted = !musicMuted;
+  if (currentTrack) currentTrack.volume = musicMuted ? 0 : 0.4;
   if (musicGain) musicGain.gain.value = musicMuted ? 0 : 0.08;
   const btn = $('music-btn');
   if (btn) btn.textContent = musicMuted ? '🔇' : '🔊';

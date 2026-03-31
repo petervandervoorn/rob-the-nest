@@ -79,7 +79,7 @@ const COLORS = Array.from({ length: 100 }, (_, i) =>
   `hsl(${Math.round(i * 137.5) % 360}, 70%, 55%)`
 );
 
-const VALID_CHARACTERS = new Set(['pete', 'francis', 'alicia', 'nigel', 'scotland', 'chardi']);
+const VALID_CHARACTERS = new Set(['pete', 'francis', 'alicia', 'nigel', 'scotland', 'chardi', 'anthony', 'corbett', 'hayden', 'john', 'tanya']);
 
 // ── Character abilities (hidden from players) ────────────────────────────────
 // pete:     swift feet — 125ms move cooldown instead of 150ms
@@ -88,6 +88,11 @@ const VALID_CHARACTERS = new Set(['pete', 'francis', 'alicia', 'nigel', 'scotlan
 // nigel:    fortified base — takes 2 visits to steal (crack + steal)
 // scotland: extended boost — speed/shield duration 50% longer
 // chardi:   quick hands — steals 2 items, keeps 1, drops 1
+// anthony:  swift feet — same as pete
+// corbett:  phantom — same as alicia
+// hayden:   fortified base — same as nigel
+// john:     quick hands — same as chardi
+// tanya:    double carry — same as francis
 
 const DIR_DELTA = {
   up:    { dx:  0, dy: -1 },
@@ -263,7 +268,7 @@ function snapshot() {
       speedBoostExpiry: p.speedBoost,
       shieldExpiry:     p.shield,
       campTicks:        p.campTicks,
-      phantom:          p.character === 'alicia' && p.carrying === 0,
+      phantom:          (p.character === 'alicia' || p.character === 'corbett') && p.carrying === 0,
     };
   }
   return {
@@ -509,7 +514,7 @@ io.on('connection', socket => {
 
     const now      = Date.now();
     const boosted  = p.speedBoost > now;
-    const baseCd   = p.character === 'pete' ? 125 : MOVE_COOLDOWN;
+    const baseCd   = (p.character === 'pete' || p.character === 'anthony') ? 125 : MOVE_COOLDOWN;
     const cooldown = boosted ? Math.floor(baseCd / 2) : baseCd;
     if (now - p.lastMove < cooldown) return;
 
@@ -567,12 +572,12 @@ io.on('connection', socket => {
     }
 
     // Steal from enemy base
-    const maxCarry = p.character === 'francis' ? 2 : 1;
+    const maxCarry = (p.character === 'francis' || p.character === 'tanya') ? 2 : 1;
     if (p.carrying < maxCarry) {
       for (const q of Object.values(state.players)) {
         if (q.id !== socket.id && nx === q.baseX && ny === q.baseY && q.baseItems > 0) {
           // Nigel's fortified base: first visit cracks, second visit steals
-          if (q.character === 'nigel') {
+          if (q.character === 'nigel' || q.character === 'hayden') {
             const crack = state.baseCracked[q.id];
             if (crack && crack.by === socket.id && now - crack.at < 3000) {
               delete state.baseCracked[q.id];
@@ -584,7 +589,7 @@ io.on('connection', socket => {
             }
           }
           // Chardi's quick hands: steals 2, keeps 1, drops 1
-          if (p.character === 'chardi' && q.baseItems >= 2) {
+          if ((p.character === 'chardi' || p.character === 'john') && q.baseItems >= 2) {
             q.baseItems -= 2;
             p.carrying = 1;
             spawnDroppedItem(q.baseX, q.baseY);

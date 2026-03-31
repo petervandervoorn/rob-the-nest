@@ -52,7 +52,7 @@ let selectedCharacter = 'pete';
 
 // Preload character images
 const characterImgs = {};
-for (const name of ['pete', 'francis', 'alicia', 'nigel', 'scotland', 'chardi']) {
+for (const name of ['pete', 'francis', 'alicia', 'nigel', 'scotland', 'chardi', 'anthony', 'corbett', 'hayden', 'john', 'tanya']) {
   const img = new Image();
   img.src = `/characters/${name}.png`;
   characterImgs[name] = img;

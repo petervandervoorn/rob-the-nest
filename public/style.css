@@ -32,9 +32,11 @@ h1 {
 /* ── Character picker ────────────────────────────────────────────────────── */
 #char-picker {
   display: flex;
+  flex-wrap: wrap;
   justify-content: center;
   gap: 12px;
   margin: 0 auto 1.2rem;
+  max-width: 500px;
 }
 
 .char-opt {
@@ -489,8 +491,9 @@ input[type="number"]:focus { outline: none; border-color: #e74c3c; }
     max-width: 100vw !important;
   }
   #timer { font-size: 1.2rem; min-width: auto; }
-  #char-picker { max-width: 100%; }
-  .char-opt img { width: 36px; height: 36px; }
-  .char-opt { padding: 6px 10px; }
+  #char-picker { max-width: 100%; gap: 8px; }
+  .char-opt img { width: 32px; height: 32px; }
+  .char-opt { padding: 5px 8px; }
+  .char-opt span { font-size: 0.65rem; }
   #dpad { display: flex; }
 }
